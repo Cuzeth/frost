@@ -9,9 +9,9 @@
 # Pipeline:
 #   1. Read the version from the .app's Info.plist.
 #   2. Stage the .app (+ an /Applications symlink) and build a compressed DMG.
-#   3. Run Sparkle's generate_appcast over the output dir — it signs the DMG
-#      with the EdDSA private key (read from the login Keychain) and writes
-#      appcast.xml.
+#   3. Run Sparkle's generate_appcast over a clean one-release staging dir — it
+#      signs the DMG with the EdDSA private key (read from the login Keychain)
+#      and writes appcast.xml.
 #
 # Then upload BOTH dist/Frost-<version>.dmg and dist/appcast.xml to:
 #   https://updates.abdeen.dev/frost/
@@ -49,8 +49,8 @@ find_sparkle_bin() {
   fi
   local derived="$HOME/Library/Developer/Xcode/DerivedData"
   local hit
-  hit="$(/usr/bin/find "$derived" -type f -name generate_appcast \
-        -path '*/artifacts/sparkle/Sparkle/bin/generate_appcast' 2>/dev/null \
+  hit="$(/usr/bin/find "$derived" -type f \
+        -path "$derived/frost-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast" 2>/dev/null \
         | head -n 1)"
   if [ -n "$hit" ]; then
     dirname "$hit"
@@ -78,7 +78,8 @@ echo "Packaging Frost $SHORT_VERSION (build $BUILD_VERSION)"
 mkdir -p "$DIST_DIR"
 DMG_PATH="$DIST_DIR/Frost-$SHORT_VERSION.dmg"
 STAGING="$(mktemp -d)"
-trap 'rm -rf "$STAGING"' EXIT
+APPCAST_INPUT="$(mktemp -d)"
+trap 'rm -rf "$STAGING" "$APPCAST_INPUT"' EXIT
 
 cp -R "$APP_PATH" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
@@ -94,13 +95,14 @@ hdiutil create \
 echo "Built DMG: $DMG_PATH"
 
 # --- Generate / update the appcast -----------------------------------------
-# generate_appcast scans DIST_DIR for archives, signs each with the EdDSA
-# private key from the login Keychain (created by `generate_keys`), and writes
-# appcast.xml with enclosure URLs prefixed by DOWNLOAD_URL_PREFIX.
+# generate_appcast signs every archive it sees, so feed it a clean staging dir
+# containing only this release's DMG. That keeps stray/aborted files in dist/
+# out of the public appcast.
+cp -p "$DMG_PATH" "$APPCAST_INPUT/"
 "$SPARKLE_BIN/generate_appcast" \
   --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
   -o "$DIST_DIR/appcast.xml" \
-  "$DIST_DIR"
+  "$APPCAST_INPUT"
 
 echo
 echo "Done."

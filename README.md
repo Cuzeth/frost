@@ -1,8 +1,7 @@
 # Frost
 
 Frost is a macOS menu-bar input locker. It suppresses keyboard, mouse, and
-trackpad input while keeping the display visible, then unlocks with Touch ID or
-the normal macOS password fallback.
+trackpad input while keeping the display visible, then unlocks with Touch ID.
 
 It is built for the awkward but useful moment when you want the Mac to keep
 showing an unattended task, but you do not want local input to interfere with it:
@@ -24,6 +23,7 @@ screen contents stay visible.
 Frost is a focused macOS app in active development.
 
 - Platform: macOS 14.6+
+- Requires: a Mac with Touch ID configured
 - UI: SwiftUI plus AppKit
 - App type: `LSUIElement` menu-bar agent, with no Dock icon
 - Bundle ID: `dev.abdeen.frost`
@@ -35,20 +35,23 @@ Frost is a focused macOS app in active development.
 
 When you choose **Lock Input**, Frost:
 
-1. Checks that Accessibility is granted.
-2. Creates an active `CGEvent` tap.
-3. Suppresses keyboard and pointer events by swallowing them in the tap callback.
-4. Freezes the cursor position.
-5. Shows a translucent overlay on every display.
-6. Hides system switching surfaces that cannot be stopped at the event-tap layer.
-7. Optionally holds power assertions to keep the display and/or system awake.
-8. Waits for the configured unlock shortcut.
+1. Checks that Touch ID is available and configured.
+2. Checks that Accessibility is granted.
+3. Creates an active `CGEvent` tap.
+4. Suppresses keyboard and pointer events by swallowing them in the tap callback.
+5. Freezes the cursor position.
+6. Shows a translucent overlay on every display.
+7. Hides system switching surfaces that cannot be stopped at the event-tap layer.
+8. Optionally holds power assertions to keep the display and/or system awake.
+9. Waits for the configured unlock shortcut.
 
 When you press the unlock shortcut, Frost keeps the overlay and event tap active,
-then asks macOS to authenticate with `LAContext.evaluatePolicy(.deviceOwnerAuthentication)`.
-That gives Touch ID when available and password fallback when needed. If
-authentication succeeds, Frost tears everything down and restores normal input.
-If it is cancelled or fails, Frost returns to the locked state.
+then asks macOS to authenticate with
+`LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)`. Frost uses
+Touch ID only; keyboard password fallback is not a supported unlock path while
+keyboard input is intentionally suppressed. If authentication succeeds, Frost
+tears everything down and restores normal input. If it is cancelled or fails,
+Frost returns to the locked state.
 
 The default unlock shortcut is `Control-Option-Command-U`.
 
@@ -76,8 +79,8 @@ they are part of the project contract.
 
 ### Normal Unlock
 
-Press the configured unlock shortcut, then authenticate with Touch ID or the
-macOS password fallback.
+Press the configured unlock shortcut, then authenticate with the macOS Touch ID
+prompt.
 
 The unlock shortcut is recognized inside the event-tap callback, because normal
 menu and keyboard routing is unavailable while input is suppressed.
@@ -89,7 +92,7 @@ teardown restores the cursor, releases the event tap, releases power assertions,
 dismisses overlays, and clears app presentation options.
 
 Because local input is suppressed while locked, the practical recovery route is
-from another device over SSH:
+from another device over SSH with Remote Login enabled before locking:
 
 ```sh
 pkill -x frost
@@ -101,18 +104,24 @@ that was opened before locking can also send the signal.
 There is intentionally no in-repo kill script. The `SIGTERM` handler is the
 recovery contract.
 
+`SIGTERM` is the supported remote-kill path. A forced kill such as `kill -9` or
+a process crash skips Frost's teardown and relies on macOS to reclaim the event
+tap and cursor association.
+
 ### Debug Auto-Unlock
 
-Debug builds include an automatic unlock timer. In the current code, it fires
-after 20 seconds and tears the lock down regardless of authentication state.
+Debug builds include an automatic unlock timer. The overlay shows its countdown,
+and it tears the lock down regardless of authentication state.
 
 This is compiled only in `DEBUG` builds and must never ship in release builds.
 
 ### Recovery UI
 
-If Frost cannot acquire the required permissions or cannot create an event tap,
-it does not lock input. Instead, it shows an **Input Not Locked** recovery overlay
-with guidance and a button to open Privacy settings.
+If Frost cannot acquire the required permissions, cannot verify Touch ID, or
+cannot create an event tap, it does not lock input. Instead, it shows an
+**Input Not Locked** recovery overlay with guidance and a retry button. When
+Accessibility is the issue, the overlay also includes a button to open Privacy
+settings.
 
 If macOS disables the event tap while Frost is already locked, Frost attempts to
 re-enable it immediately and shows a visible warning on the overlay. If the tap
@@ -121,9 +130,9 @@ cannot be created at all, Frost does not lock input.
 ### Force Quit
 
 Frost disables the Force Quit panel while locked. This is intentional: opening
-Force Quit while the Touch ID/password prompt is active can steal focus from the
-auth prompt and strand the user. Use the unlock shortcut, the debug auto-unlock
-in debug builds, or the `SIGTERM` path above.
+Force Quit while the Touch ID prompt is active can steal focus from the auth
+prompt and strand the user. Use the unlock shortcut, the debug auto-unlock in
+debug builds, or the `SIGTERM` path above.
 
 ## Permissions
 
@@ -148,8 +157,10 @@ Frost opens the settings window directly.
 Current settings:
 
 - Unlock Shortcut: required; defaults to `Control-Option-Command-U`.
-- Lock Shortcut: optional global shortcut that starts input suppression.
-- Auto-lock: optional inactivity timer.
+- Lock Shortcut: optional global shortcut that starts input suppression. Frost
+  clears it if it matches the unlock shortcut.
+- Auto-lock: optional inactivity timer based on keyboard, mouse, and trackpad
+  idle time.
 - Prevent screen saver: holds a display-sleep prevention assertion while locked.
 - Prevent sleep: holds an idle system-sleep prevention assertion while locked.
 - Launch at login: registers Frost as a main-app login item with `SMAppService`.
@@ -166,6 +177,7 @@ Frost is an `LSUIElement` agent, so it has no Dock icon. The menu-bar item
 contains:
 
 - Lock Input
+- Locked (disabled while input is already locked)
 - Settings...
 - Check for Updates...
 - Quit Frost
@@ -229,12 +241,11 @@ Those options are always cleared during teardown.
 `UnlockCoordinator` wraps LocalAuthentication:
 
 ```swift
-LAContext.evaluatePolicy(.deviceOwnerAuthentication)
+LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)
 ```
 
-This asks macOS for device-owner authentication. Depending on the Mac and
-current system state, that may be Touch ID, password fallback, or another
-standard macOS authentication route.
+This asks macOS for biometric authentication and Frost requires the biometric
+type to be Touch ID before it starts suppressing input.
 
 ### Power Assertions
 
@@ -330,8 +341,9 @@ The script:
 
 1. Reads the version from the exported app's `Info.plist`.
 2. Creates `dist/Frost-<version>.dmg`.
-3. Runs Sparkle's `generate_appcast`.
-4. Writes `dist/appcast.xml`.
+3. Stages that DMG in a clean temporary appcast input directory.
+4. Runs Sparkle's `generate_appcast`.
+5. Writes `dist/appcast.xml`.
 
 Upload both files to:
 
@@ -365,6 +377,3 @@ repository.
 
 - There is no test target in the current project.
 - Sparkle hardening keys are not set explicitly yet.
-- The overlay now shows an authentication state, but unlock still uses the
-  standard LocalAuthentication prompt so Touch ID and macOS password fallback
-  remain system-owned.

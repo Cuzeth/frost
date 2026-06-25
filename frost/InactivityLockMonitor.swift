@@ -14,6 +14,14 @@ final class InactivityLockMonitor {
     private weak var settings: SettingsStore?
     private weak var lock: LockController?
     private var pollTask: Task<Void, Never>?
+    private var snoozedUntil: Date?
+    private let failedLockSnoozeSeconds: TimeInterval = 60
+
+    deinit {
+        MainActor.assumeIsolated {
+            stop()
+        }
+    }
 
     func start(settings: SettingsStore, lock: LockController) {
         self.settings = settings
@@ -34,12 +42,21 @@ final class InactivityLockMonitor {
         pollTask = nil
     }
 
+    func snoozeAfterFailedLock() {
+        snoozedUntil = Date().addingTimeInterval(failedLockSnoozeSeconds)
+    }
+
     private func poll() {
         guard let settings,
               let lock,
               !lock.isLocked,
               let threshold = settings.inactivityLock.seconds
         else { return }
+
+        if let snoozedUntil {
+            guard Date() >= snoozedUntil else { return }
+            self.snoozedUntil = nil
+        }
 
         let idleSeconds = CGEventSource.secondsSinceLastEventType(
             .combinedSessionState,

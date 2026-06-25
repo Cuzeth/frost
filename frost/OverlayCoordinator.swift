@@ -19,6 +19,12 @@ final class OverlayCoordinator: NSObject {
     private var windows: [NSWindow] = []
     private weak var controller: LockController?
 
+    deinit {
+        MainActor.assumeIsolated {
+            dismiss()
+        }
+    }
+
     func present(controller: LockController) {
         self.controller = controller
         rebuild()
@@ -29,20 +35,15 @@ final class OverlayCoordinator: NSObject {
             selector: #selector(screenParametersChanged),
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil)
-        setVisible(true)
+        show()
     }
 
-    /// Hide/show every overlay window — used to reveal the screen during auth.
-    func setVisible(_ visible: Bool) {
+    private func show() {
         for window in windows {
-            if visible {
-                if window == windows.first {
-                    window.makeKeyAndOrderFront(nil)
-                } else {
-                    window.orderFrontRegardless()
-                }
+            if window == windows.first {
+                window.makeKeyAndOrderFront(nil)
             } else {
-                window.orderOut(nil)
+                window.orderFrontRegardless()
             }
         }
     }
@@ -58,7 +59,7 @@ final class OverlayCoordinator: NSObject {
     @objc private func screenParametersChanged() {
         guard !windows.isEmpty else { return }
         rebuild()
-        setVisible(true)
+        show()
     }
 
     private func rebuild() {
@@ -120,8 +121,8 @@ struct LockOverlayView: View {
 
     @ViewBuilder private var card: some View {
         switch controller.state {
-        case .recovery(let message):
-            recoveryCard(message)
+        case .recovery(let recovery):
+            recoveryCard(recovery)
         default:
             lockedCard
         }
@@ -138,7 +139,7 @@ struct LockOverlayView: View {
                     Text(authenticating ? "Authenticate" : "Input Locked")
                         .font(.title2.weight(.semibold))
                     Text(authenticating
-                         ? "Touch ID or Mac password"
+                         ? "Touch ID required"
                          : "Keyboard, mouse, and trackpad input are paused")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -230,10 +231,7 @@ struct LockOverlayView: View {
                     .font(.headline)
             }
 
-            Text("""
-                Use Touch ID, or enter your Mac password in the system prompt. \
-                Press Esc to cancel and keep input locked.
-                """)
+            Text("Use Touch ID to unlock. Press Esc to cancel and keep input locked.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -248,7 +246,7 @@ struct LockOverlayView: View {
         HStack(spacing: 8) {
             statusPill(icon: "keyboard", text: "Input paused")
             statusPill(icon: "cursorarrow", text: "Pointer frozen")
-            statusPill(icon: "lock.shield", text: "Local auth")
+            statusPill(icon: "touchid", text: "Touch ID")
         }
     }
 
@@ -285,21 +283,26 @@ struct LockOverlayView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func recoveryCard(_ message: String) -> some View {
+    private func recoveryCard(_ recovery: RecoveryState) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 40, weight: .semibold))
                 .foregroundStyle(.yellow)
-            Text("Input Not Locked")
+            Text(recovery.title)
                 .font(.title2.weight(.semibold))
-            Text(message)
+            Text(recovery.message)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             HStack(spacing: 12) {
-                Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+                if recovery.showsAccessibilitySettings {
+                    Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+                }
+                if recovery.allowsRetry {
+                    Button("Try Again") { controller.retryRecovery() }
+                        .keyboardShortcut(.defaultAction)
+                }
                 Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.defaultAction)
             }
             .padding(.top, 4)
         }

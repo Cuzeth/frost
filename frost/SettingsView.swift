@@ -25,14 +25,14 @@ struct SettingsView: View {
             } header: {
                 Text("Unlock Shortcut")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Recognized even though all other input is frozen.")
+                Text("Required. Press this while locked to bring up Touch ID. Frost requires a Mac with Touch ID.")
                     .foregroundStyle(.secondary)
             }
 
             Section {
                 LabeledContent("Lock") {
                     HStack(spacing: 8) {
-                        ShortcutRecorder(shortcut: $settings.lockShortcut, allowsClear: true)
+                        ShortcutRecorder(shortcut: lockBinding, allowsClear: true)
                             .frame(width: 170, height: 24)
                         Button("Clear") { settings.lockShortcut = nil }
                             .disabled(settings.lockShortcut == nil)
@@ -41,7 +41,7 @@ struct SettingsView: View {
             } header: {
                 Text("Lock Shortcut")
             } footer: {
-                Text("Optional. A system-wide hotkey that locks input from anywhere. Leave empty to lock only from the menu bar.")
+                Text("Optional. A system-wide hotkey that locks input from anywhere. If it matches Unlock, Frost clears it.")
                     .foregroundStyle(.secondary)
             }
 
@@ -55,7 +55,7 @@ struct SettingsView: View {
             } header: {
                 Text("Inactivity")
             } footer: {
-                Text("Locks input after the Mac has been idle for the selected time.")
+                Text("Locks after the selected time without keyboard, mouse, or trackpad input. Passive reading still counts as idle.")
                     .foregroundStyle(.secondary)
             }
 
@@ -120,7 +120,28 @@ struct SettingsView: View {
     private var unlockBinding: Binding<Shortcut?> {
         Binding(
             get: { settings.unlockShortcut },
-            set: { if let new = $0 { settings.unlockShortcut = new } }
+            set: {
+                if let new = $0 {
+                    settings.unlockShortcut = new
+                    if settings.lockShortcut == new {
+                        settings.lockShortcut = nil
+                    }
+                }
+            }
+        )
+    }
+
+    private var lockBinding: Binding<Shortcut?> {
+        Binding(
+            get: { settings.lockShortcut },
+            set: {
+                guard $0 != settings.unlockShortcut else {
+                    settings.lockShortcut = nil
+                    NSSound.beep()
+                    return
+                }
+                settings.lockShortcut = $0
+            }
         )
     }
 }

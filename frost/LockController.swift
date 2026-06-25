@@ -7,7 +7,7 @@
 //  the state machine + the DEBUG auto-unlock safety net.
 //
 //  SAFETY: independent ways out of a lock:
-//    1. The unlock chord (⌃⌥⌘U) → Touch ID / password.
+//    1. The unlock chord (⌃⌥⌘U) → Touch ID.
 //    2. The DEBUG auto-unlock timer (debug builds only).
 //    3. Sending SIGTERM (e.g. `pkill -x frost` / `kill` over SSH) — caught
 //       below and torn down cleanly, independent of app state.
@@ -22,7 +22,14 @@ enum LockState: Equatable {
     case unlocked
     case locked
     case authenticating
-    case recovery(String)
+    case recovery(RecoveryState)
+}
+
+struct RecoveryState: Equatable {
+    var title = "Input Not Locked"
+    var message: String
+    var showsAccessibilitySettings = false
+    var allowsRetry = true
 }
 
 @MainActor
@@ -79,6 +86,22 @@ final class LockController: ObservableObject {
         inactivity.start(settings: settings, lock: self)
     }
 
+    deinit {
+        MainActor.assumeIsolated {
+            removeLockHotKeyMonitor()
+            inactivity.stop()
+            stopDebugAutoUnlock()
+            sleep.releaseAll()
+            tap.stop()
+            unlocker.cancel()
+            overlay.dismiss()
+            signalSources.forEach { $0.cancel() }
+            if Self.shared === self {
+                Self.shared = nil
+            }
+        }
+    }
+
     /// Optional system-wide hotkey that STARTS a lock. A non-consuming global
     /// monitor is enough: it only needs to trigger a lock, and it never fires
     /// while Frost itself is frontmost (so it won't clash with the recorder).
@@ -88,6 +111,13 @@ final class LockController: ObservableObject {
             let keyCode = event.keyCode
             let modifiers = event.modifierFlags
             Task { @MainActor in self?.handleLockHotKey(keyCode: keyCode, modifiers: modifiers) }
+        }
+    }
+
+    private func removeLockHotKeyMonitor() {
+        if let lockHotKeyMonitor {
+            NSEvent.removeMonitor(lockHotKeyMonitor)
+            self.lockHotKeyMonitor = nil
         }
     }
 
@@ -120,15 +150,29 @@ final class LockController: ObservableObject {
     func lock() {
         guard state == .unlocked else { return }
 
+        switch unlocker.checkTouchIDAvailability() {
+        case .available:
+            break
+        case .unavailable(let message):
+            enterRecovery(RecoveryState(
+                title: "Touch ID Required",
+                message: message
+            ))
+            return
+        }
+
         // Without Accessibility the tap can't suppress input. Prompt, then show
         // the recovery state — never a lock the user can't escape.
         guard permissions.allGranted else {
             permissions.requestAccessibility()
-            enterRecovery("""
+            enterRecovery(RecoveryState(
+                message: """
                 Frost needs Accessibility. Enable it for \
-                Frost in System Settings → Privacy & Security, then choose Lock \
-                Input again. (Relaunching Frost may be required after granting.)
-                """)
+                Frost in System Settings → Privacy & Security, then try again. \
+                Input is NOT locked.
+                """,
+                showsAccessibilitySettings: true
+            ))
             return
         }
 
@@ -136,10 +180,12 @@ final class LockController: ObservableObject {
         tap.unlockShortcut = settings.unlockShortcut
 
         guard tap.start() else {
-            enterRecovery("""
+            enterRecovery(RecoveryState(
+                message: """
                 Couldn't create the input tap. Confirm Accessibility is enabled \
                 for Frost, then try again. Input is NOT locked.
-                """)
+                """
+            ))
             return
         }
 
@@ -195,18 +241,28 @@ final class LockController: ObservableObject {
 
         authenticationTask = Task { [weak self] in
             guard let self else { return }
-            let ok = await self.unlocker.authenticate(reason: "Unlock Frost")
+            let result = await self.unlocker.authenticate(reason: "Unlock Frost")
             if Task.isCancelled { return }
             self.authenticationTask = nil
             guard self.state == .authenticating else { return } // safety net won the race
-            if ok { self.finishUnlock() } else { self.reLock() }
+            switch result {
+            case .success:
+                self.finishUnlock()
+            case .unavailable(let message):
+                self.reLock(notice: message)
+            case .cancelled, .failed:
+                self.reLock()
+            }
         }
     }
 
-    private func reLock() {
+    private func reLock(notice: String? = nil) {
         // The overlay never hid and the tap never stopped suppressing; just
         // re-freeze Esc and return to the locked state.
         tap.setAuthenticating(false)
+        if let notice {
+            tapRecoveryNotice = notice
+        }
         state = .locked
         log.info("Re-locked after failed/cancelled auth")
     }
@@ -218,9 +274,16 @@ final class LockController: ObservableObject {
 
     // MARK: - Recovery
 
-    private func enterRecovery(_ message: String) {
-        state = .recovery(message)
+    private func enterRecovery(_ recovery: RecoveryState) {
+        inactivity.snoozeAfterFailedLock()
+        state = .recovery(recovery)
         overlay.present(controller: self)
+    }
+
+    func retryRecovery() {
+        guard case .recovery = state else { return }
+        teardown()
+        lock()
     }
 
     func dismissRecovery() {

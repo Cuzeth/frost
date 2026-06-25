@@ -61,6 +61,10 @@ final class SettingsStore: ObservableObject {
         ) ?? .off
         self.preventScreenSaver = defaults.bool(forKey: Key.preventScreenSaver)
         self.preventSleep = defaults.bool(forKey: Key.preventSleep)
+        if self.lockShortcut == self.unlockShortcut {
+            self.lockShortcut = nil
+            write(nil, forKey: Key.lockShortcut)
+        }
     }
 
     private func write(_ shortcut: Shortcut?, forKey key: String) {

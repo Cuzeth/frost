@@ -9,7 +9,7 @@
 //
 //  During authentication the tap stays active and the cursor stays frozen — the
 //  screen is never exposed — but the Esc key is allowed through so the user can
-//  cancel the system Touch ID / password prompt and stay locked.
+//  cancel the system Touch ID prompt and stay locked.
 //
 //  Placement: .cgSessionEventTap. The HID-entry tap is earlier in the event
 //  stream, but Apple's SDK requires root for kCGHIDEventTap. Frost deliberately
@@ -43,13 +43,19 @@ final class EventTapManager {
     /// from "the system disabled the tap" so we never re-enable against intent.
     private var shouldSuppress = false
     /// While authenticating, the Esc key is the ONE event we let through (so the
-    /// system Touch ID / password prompt can be cancelled). Everything else stays
-    /// suppressed and the cursor stays frozen — the screen is never exposed.
+    /// system Touch ID prompt can be cancelled). Everything else stays suppressed
+    /// and the cursor stays frozen — the screen is never exposed.
     private var passEscapeToSystem = false
     private var lockedCursorPosition: CGPoint?
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "EventTap")
 
     private(set) var isRunning = false
+
+    deinit {
+        MainActor.assumeIsolated {
+            stop()
+        }
+    }
 
     /// Creates and enables the tap. Returns `false` if creation fails at every
     /// placement — almost always missing Accessibility. The
@@ -104,7 +110,7 @@ final class EventTapManager {
 
     /// Enter/leave authentication mode WITHOUT changing suppression: the tap
     /// stays active, input stays swallowed, and the cursor stays frozen, so the
-    /// screen is never exposed while the Touch ID / password prompt is up. The
+    /// screen is never exposed while the Touch ID prompt is up. The
     /// only difference is that Esc is allowed through, letting the user cancel
     /// the prompt and remain locked. Leaving auth mode re-freezes Esc.
     func setAuthenticating(_ on: Bool) {

@@ -24,6 +24,12 @@ final class SleepAssertionManager {
     private var holdingSystem = false
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Sleep")
 
+    deinit {
+        MainActor.assumeIsolated {
+            releaseAll()
+        }
+    }
+
     /// Reconcile held assertions with what the settings ask for.
     func apply(preventScreenSaver: Bool, preventSleep: Bool) {
         setDisplay(preventScreenSaver)
