@@ -78,6 +78,7 @@ sparkle_priv*
 dist/
 *.dmg
 *.zip
+frost.app
 
 # Build / archive / notarization byproducts
 build/
