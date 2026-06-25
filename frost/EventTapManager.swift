@@ -23,15 +23,17 @@ import CoreGraphics
 import Foundation
 import os
 
-// kVK_ANSI_U (Carbon HIToolbox). Unlock chord is Control–Option–Command–U.
-private let kUnlockKeyCode: Int64 = 0x20
 // kVK_Escape — passed through during auth so the user can cancel the prompt.
 private let kEscapeKeyCode: Int64 = 0x35
 
 @MainActor
 final class EventTapManager {
-    /// Invoked on the main actor when the unlock chord is pressed.
+    /// Invoked on the main actor when the unlock shortcut is pressed.
     var onUnlockChord: (() -> Void)?
+
+    /// The shortcut that triggers unlock, recognized inside the callback while
+    /// input is suppressed. Set by LockController from the user's settings.
+    var unlockShortcut: Shortcut?
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -179,13 +181,8 @@ final class EventTapManager {
     }
 
     private func isUnlockChord(_ event: CGEvent) -> Bool {
-        guard event.getIntegerValueField(.keyboardEventKeycode) == kUnlockKeyCode else {
-            return false
-        }
-        let flags = event.flags
-        return flags.contains(.maskControl)
-            && flags.contains(.maskAlternate)
-            && flags.contains(.maskCommand)
+        guard let unlockShortcut else { return false }
+        return unlockShortcut.matches(cgEvent: event)
     }
 }
 

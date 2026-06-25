@@ -36,12 +36,16 @@ final class LockController: ObservableObject {
     private let tap = EventTapManager()
     private let overlay = OverlayCoordinator()
     private let unlocker = UnlockCoordinator()
+    private let sleep = SleepAssertionManager()
+    private let settings: SettingsStore
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Lock")
 
     /// Weak global handle so the SIGTERM dispatch source can reach the live
     /// controller without capturing it in a @Sendable closure.
     nonisolated(unsafe) static weak var shared: LockController?
     private var signalSources: [any DispatchSourceSignal] = []
+    /// Global key monitor for the optional lock hotkey (active while unlocked).
+    private var lockHotKeyMonitor: Any?
 
     #if DEBUG
     /// DEBUG-only: the lock always tears down after this many seconds, no matter
@@ -52,14 +56,37 @@ final class LockController: ObservableObject {
 
     var isLocked: Bool { state != .unlocked }
 
-    init() {
+    /// The configured unlock shortcut, formatted for the overlay hint.
+    var unlockShortcutDisplay: String { settings.unlockShortcut.displayString }
+
+    init(settings: SettingsStore) {
+        self.settings = settings
         Self.shared = self
+        tap.unlockShortcut = settings.unlockShortcut
         // Defer to the next main-loop tick so we never mutate the tap from
         // inside its own callback.
         tap.onUnlockChord = { [weak self] in
             Task { @MainActor in self?.requestUnlock() }
         }
         installTerminationHandler()
+        installLockHotKeyMonitor()
+    }
+
+    /// Optional system-wide hotkey that STARTS a lock. A non-consuming global
+    /// monitor is enough: it only needs to trigger a lock, and it never fires
+    /// while Frost itself is frontmost (so it won't clash with the recorder).
+    private func installLockHotKeyMonitor() {
+        lockHotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // Pull the Sendable bits out here; hop to the main actor to act.
+            let keyCode = event.keyCode
+            let modifiers = event.modifierFlags
+            Task { @MainActor in self?.handleLockHotKey(keyCode: keyCode, modifiers: modifiers) }
+        }
+    }
+
+    private func handleLockHotKey(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
+        guard state == .unlocked, let shortcut = settings.lockShortcut else { return }
+        if shortcut.matches(keyCode: keyCode, modifiers: modifiers) { lock() }
     }
 
     /// Catch SIGTERM (e.g. from `pkill`/`kill` over SSH) so we can restore the
@@ -99,6 +126,9 @@ final class LockController: ObservableObject {
             return
         }
 
+        // Recognize the latest configured unlock shortcut for this session.
+        tap.unlockShortcut = settings.unlockShortcut
+
         guard tap.start() else {
             enterRecovery("""
                 Couldn't create the input tap. Confirm Accessibility and Input \
@@ -112,6 +142,8 @@ final class LockController: ObservableObject {
         startDebugAutoUnlock()
         overlay.present(controller: self)
         enterKioskMode()
+        sleep.apply(preventScreenSaver: settings.preventScreenSaver,
+                    preventSleep: settings.preventSleep)
         state = .locked
         log.info("Locked")
     }
@@ -197,6 +229,7 @@ final class LockController: ObservableObject {
     private func teardown() {
         stopDebugAutoUnlock()
         exitKioskMode()
+        sleep.releaseAll()
         tap.stop()
         unlocker.cancel()
         overlay.dismiss()

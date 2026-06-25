@@ -111,7 +111,7 @@ struct LockOverlayView: View {
                 .font(.title2.weight(.semibold))
             Text(authenticating
                  ? "Use Touch ID to unlock · press Esc to cancel"
-                 : "Press ⌃⌥⌘U to unlock (Touch ID)")
+                 : "Press \(controller.unlockShortcutDisplay) to unlock (Touch ID)")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
