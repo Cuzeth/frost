@@ -28,7 +28,7 @@ struct frostApp: App {
 
     var body: some Scene {
         // LSUIElement agent: no Dock icon, no window — the menu bar is the UI.
-        MenuBarExtra("Frost", systemImage: "snowflake") {
+        MenuBarExtra("Frost", image: "MenuBarIcon") {
             Button(lock.isLocked ? "Locked" : "Lock Input") {
                 lock.lock()
             }
