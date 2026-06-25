@@ -3,7 +3,7 @@
 //  frost
 //
 //  The preferences window: configure the lock/unlock shortcuts and the
-//  while-locked power behavior. Reached from the menu bar via SettingsLink.
+//  while-locked power behavior.
 //
 
 import AppKit

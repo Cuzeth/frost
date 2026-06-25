@@ -8,7 +8,7 @@ import AppKit
 
 @main
 struct frostApp: App {
-    // Opens Settings on launch/reopen when the menu bar icon is hidden — the
+    // Opens Settings on launch/reopen when the menu bar icon is hidden - the
     // user's only way back in once the icon is gone.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     // Owns Sparkle for the app's lifetime. Created once here so the updater
@@ -28,6 +28,7 @@ struct frostApp: App {
         _settings = StateObject(wrappedValue: settings)
         _updater = StateObject(wrappedValue: UpdaterController())
         _lock = StateObject(wrappedValue: LockController(settings: settings))
+        SettingsWindowController.shared.configure(settings: settings)
     }
 
     var body: some Scene {
@@ -41,8 +42,8 @@ struct frostApp: App {
 
             Divider()
 
-            SettingsLink {
-                Text("Settings…")
+            Button("Settings…") {
+                SettingsWindowController.shared.show()
             }
             .keyboardShortcut(",")
 
@@ -60,8 +61,5 @@ struct frostApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Settings {
-            SettingsView(settings: settings)
-        }
     }
 }
