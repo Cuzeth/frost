@@ -8,27 +8,34 @@
 #   1. Build the DMG and EdDSA-sign the Sparkle appcast (private key read from
 #      your login Keychain — it never leaves this machine).
 #   2. Create the GitHub Release for tag v<version> and upload the DMG.
-#   3. Deploy the signed appcast to updates.abdeen.dev (Vercel).
+#   3. Publish the signed appcast by committing it to the abdeen.dev repo and
+#      pushing — Vercel then deploys it.
 #
-# Distribution split: the DMG is hosted on GitHub Releases (the appcast's
-# <enclosure url> points back at that asset); the appcast itself MUST stay at
-# https://updates.abdeen.dev/frost/appcast.xml because Info.plist's SUFeedURL
-# hardcodes it. The download PAGE lives in the abdeen.dev repo (src/app/frost),
-# is dynamic (reads GitHub at load time), and is deployed with that site — it is
-# not touched here.
+# Hosting model: the DMG lives on GitHub Releases (the appcast's <enclosure url>
+# points back at that asset). updates.abdeen.dev is a domain ALIAS of the single
+# abdeen.dev Vercel project, so the appcast is just a static file in that repo at
+# public/frost/appcast.xml — served at https://updates.abdeen.dev/frost/appcast.xml
+# (the SUFeedURL) and at https://abdeen.dev/frost/appcast.xml. The download PAGE
+# also lives in the abdeen.dev repo (src/app/frost), reads GitHub at load time,
+# and ships with the site — it is not touched here.
 #
 # Usage:
-#   scripts/release.sh /path/to/frost.app                 # build, release, deploy
-#   DEPLOY=0 scripts/release.sh /path/to/frost.app        # build + release, skip deploy
+#   scripts/release.sh /path/to/frost.app                 # build, release, publish
+#   DEPLOY=0 scripts/release.sh /path/to/frost.app        # build + release, stage appcast only
 #
-# Prereqs: gh (authenticated), the Sparkle tools publish.sh discovers, and the
-# vercel CLI authenticated and `vercel link`ed to the updates.abdeen.dev project.
+# Environment:
+#   ABDEEN_DEV_REPO   Path to the abdeen.dev working copy (default: sibling of
+#                     this repo, ../abdeen.dev).
+#
+# Prereqs: gh (authenticated), the Sparkle tools publish.sh discovers, and a
+# clean abdeen.dev checkout with push access (Vercel deploys on push).
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_SLUG="${REPO_SLUG:-Cuzeth/frost}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
+SITE_REPO="${ABDEEN_DEV_REPO:-$REPO_ROOT/../abdeen.dev}"
 
 if [ ! -d "$APP_PATH" ]; then
   echo "error: notarized frost.app not found at: $APP_PATH" >&2
@@ -64,27 +71,34 @@ gh release create "$TAG" "$DMG" \
   --title "Frost $VERSION" \
   --generate-notes
 
-# --- 3. Deploy the appcast to updates.abdeen.dev (Vercel) -------------------
-# A Vercel production deploy REPLACES the project's served files with the deployed
-# directory. updates.abdeen.dev is its own Vercel project (separate from the
-# abdeen.dev site). Point UPDATES_SITE_DIR at that project's working copy so the
-# fresh appcast is added without dropping anything else it serves; the script
-# copies it to <dir>/frost/appcast.xml and deploys from there.
-SITE_DIR="${UPDATES_SITE_DIR:-$REPO_ROOT/dist/site}"
-if [ -z "${UPDATES_SITE_DIR:-}" ]; then
-  rm -rf "$SITE_DIR"
-  echo "warning: UPDATES_SITE_DIR not set — deploying a Frost-only dir." >&2
-  echo "         A prod deploy REPLACES the target project; set UPDATES_SITE_DIR" >&2
-  echo "         to your updates.abdeen.dev working copy if it serves anything else." >&2
+# --- 3. Publish the appcast via the abdeen.dev site -------------------------
+# updates.abdeen.dev is a domain alias of the abdeen.dev Vercel project, so the
+# appcast is a static file in that repo. Copy it in, then commit + push only that
+# file (a pathspec commit, so unrelated working changes are never swept in).
+if [ ! -d "$SITE_REPO/.git" ]; then
+  echo "error: abdeen.dev repo not found at: $SITE_REPO" >&2
+  echo "Set ABDEEN_DEV_REPO to its path, or copy dist/appcast.xml to" >&2
+  echo "<abdeen.dev>/public/frost/appcast.xml and deploy the site yourself." >&2
+  exit 1
 fi
-mkdir -p "$SITE_DIR/frost"
-cp "$APPCAST" "$SITE_DIR/frost/appcast.xml"
+
+DEST_REL="public/frost/appcast.xml"
+DEST="$SITE_REPO/$DEST_REL"
+mkdir -p "$(dirname "$DEST")"
+cp "$APPCAST" "$DEST"
+echo "Updated $DEST"
 
 if [ "${DEPLOY:-1}" = "1" ]; then
-  # `vercel link` this dir to the updates.abdeen.dev project once, then deploy.
-  ( cd "$SITE_DIR" && vercel deploy --prod --yes )
+  if [ -z "$(git -C "$SITE_REPO" status --porcelain -- "$DEST_REL")" ]; then
+    echo "Appcast unchanged in the site repo — nothing to deploy."
+  else
+    git -C "$SITE_REPO" add -- "$DEST_REL"
+    git -C "$SITE_REPO" commit -m "frost: appcast for $VERSION" -- "$DEST_REL"
+    git -C "$SITE_REPO" push
+    echo "Pushed appcast to abdeen.dev — Vercel will deploy it."
+  fi
 else
-  echo "Appcast written to $SITE_DIR/frost/appcast.xml (DEPLOY=0 — not deployed)."
+  echo "DEPLOY=0 — appcast written to $DEST but not committed/pushed."
 fi
 
 echo

@@ -13,12 +13,13 @@ Two independent trust layers ship a release. Don't conflate them:
 | Artifact | Host |
 |---|---|
 | `Frost-x.y.z.dmg` (notarized) | GitHub Releases (`github.com/Cuzeth/frost`) |
-| `appcast.xml` (EdDSA-signed) | `updates.abdeen.dev/frost/appcast.xml` (Vercel) |
-| Download page | `abdeen.dev/frost` — lives in the abdeen.dev repo at `src/app/frost`, reads the latest release from GitHub at load time |
+| `appcast.xml` (EdDSA-signed) | `public/frost/appcast.xml` in the **abdeen.dev repo**, served at `updates.abdeen.dev/frost/appcast.xml` |
+| Download page | `abdeen.dev/frost` — also in the abdeen.dev repo (`src/app/frost`), reads the latest release from GitHub at load time |
 
-The appcast's `<enclosure url>` points back at the GitHub DMG. The DMG is never
-uploaded to your domain. The download page is part of the abdeen.dev site and
-deploys with it (Vercel git push); it does not change per release.
+`updates.abdeen.dev` is a **domain alias** of the single abdeen.dev Vercel
+project, so the appcast is just a static file in that repo and ships when the site
+deploys. The appcast's `<enclosure url>` points back at the GitHub DMG — the DMG
+is never uploaded to your domain. The download page doesn't change per release.
 
 ## One-time setup
 
@@ -29,29 +30,17 @@ deploys with it (Vercel git push); it does not change per release.
    `generate_keys -p` must print `V8xkC2BQlZG91vsCTw7ACPjL1dbRlBKo+ftb9ymNbdM=`.
    If it prints anything else, **stop** — signing with the wrong key breaks
    updates for every installed copy.
-4. **CLIs**: `gh auth login`, and `vercel login` with the CLI `vercel link`ed to
-   the `updates.abdeen.dev` project.
-5. **Download page**: it's the `abdeen.dev/frost` route in the abdeen.dev repo
-   (`src/app/frost`). It reads the latest release from GitHub, so once it's live
-   it doesn't need redeploying per version — it ships with the abdeen.dev site.
-
-### `updates.abdeen.dev` hosting note
-
-It must serve `frost/appcast.xml`. This is a Vercel project bound to the
-`updates.abdeen.dev` domain, separate from the abdeen.dev site. Serving `.xml` as
-`application/xml` (the default) is fine for Sparkle.
-
-**A production deploy replaces the project's served files with the deployed
-directory.** So point `UPDATES_SITE_DIR` at that project's working copy — the
-script copies the fresh `appcast.xml` into `<dir>/frost/` and deploys the whole
-dir, preserving anything else it serves:
-
-```sh
-UPDATES_SITE_DIR=~/sites/updates.abdeen.dev scripts/release.sh /path/to/frost.app
-```
-
-Without `UPDATES_SITE_DIR`, it deploys a Frost-only dir (just `frost/appcast.xml`)
-and warns — only safe if `updates.abdeen.dev` is dedicated to Frost.
+4. **`gh auth login`**, and an **abdeen.dev checkout** with push access (the
+   release script commits the appcast there; Vercel deploys on push).
+5. **Add `updates.abdeen.dev` as a domain** on the abdeen.dev Vercel project
+   (Project → Settings → Domains), and point its DNS at Vercel. Both
+   `abdeen.dev/frost/appcast.xml` and `updates.abdeen.dev/frost/appcast.xml` then
+   serve `public/frost/appcast.xml`. Serving `.xml` as `application/xml` (the
+   default) is fine for Sparkle. This is the only piece that makes `SUFeedURL`
+   resolve, so do it before the first release.
+6. **Download page**: the `abdeen.dev/frost` route (`src/app/frost`). It reads the
+   latest release from GitHub, so it doesn't need redeploying per version — it
+   ships with the abdeen.dev site.
 
 ## Cutting a release
 
@@ -62,13 +51,15 @@ and warns — only safe if `updates.abdeen.dev` is dedicated to Frost.
 2. **Push** `main` so the tag will reference a real remote commit.
 3. **Archive → Distribute → Developer ID** in Xcode: sign, notarize, staple,
    export `frost.app`.
-4. **Run the release script** (it builds the DMG, signs the appcast, creates the
-   GitHub release, and deploys the appcast to Vercel):
+4. **Run the release script** (builds the DMG, signs the appcast, creates the
+   GitHub release, and commits + pushes the appcast to the abdeen.dev repo so
+   Vercel deploys it):
    ```sh
-   UPDATES_SITE_DIR=~/sites/updates.abdeen.dev scripts/release.sh /path/to/frost.app
+   ABDEEN_DEV_REPO=~/GitHub/abdeen.dev scripts/release.sh /path/to/frost.app
    ```
-   Add `DEPLOY=0` to build + create the release but skip the Vercel deploy (the
-   appcast is written under the staged dir for you to deploy by hand).
+   `ABDEEN_DEV_REPO` defaults to `../abdeen.dev` (a sibling checkout), so you can
+   omit it if the repos sit side by side. Add `DEPLOY=0` to build + create the
+   release but only write the appcast into the repo (no commit/push).
 5. **Verify**: open the GitHub release, confirm the `.dmg` downloads and opens
    without a Gatekeeper warning, then confirm an older build sees the update via
    *Check for Updates…*.
@@ -77,5 +68,7 @@ and warns — only safe if `updates.abdeen.dev` is dedicated to Frost.
 
 Tag is `v$MARKETING_VERSION`. It refuses to overwrite an existing release. It sets
 `DOWNLOAD_URL_PREFIX` to the GitHub asset URL and calls `publish.sh` (DMG +
-`generate_appcast`), then `gh release create … <dmg>`, then deploys the appcast.
-Apple and Sparkle private keys stay in your Keychain the whole time.
+`generate_appcast`), then `gh release create … <dmg>`, then copies the appcast to
+`<abdeen.dev>/public/frost/appcast.xml` and commits + pushes **only that file**
+(a pathspec commit, so unrelated working changes are never swept in). Apple and
+Sparkle private keys stay in your Keychain the whole time.
