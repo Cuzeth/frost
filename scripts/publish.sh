@@ -28,7 +28,9 @@ set -euo pipefail
 # --- Config -----------------------------------------------------------------
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
-DOWNLOAD_URL_PREFIX="https://updates.abdeen.dev/frost/"
+# Where the appcast's <enclosure url> should point. Overridable so release.sh can
+# aim it at the GitHub Releases asset while standalone runs keep the legacy host.
+DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-https://updates.abdeen.dev/frost/}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
 
 # --- Locate the exported .app ----------------------------------------------
