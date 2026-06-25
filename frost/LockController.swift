@@ -28,6 +28,7 @@ enum LockState: Equatable {
 @MainActor
 final class LockController: ObservableObject {
     @Published private(set) var state: LockState = .unlocked
+    @Published private(set) var tapRecoveryNotice: String?
     #if DEBUG
     @Published private(set) var debugSecondsRemaining: Int?
     #endif
@@ -37,6 +38,7 @@ final class LockController: ObservableObject {
     private let overlay = OverlayCoordinator()
     private let unlocker = UnlockCoordinator()
     private let sleep = SleepAssertionManager()
+    private let inactivity = InactivityLockMonitor()
     private let settings: SettingsStore
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Lock")
 
@@ -46,6 +48,7 @@ final class LockController: ObservableObject {
     private var signalSources: [any DispatchSourceSignal] = []
     /// Global key monitor for the optional lock hotkey (active while unlocked).
     private var lockHotKeyMonitor: Any?
+    private var authenticationTask: Task<Void, Never>?
 
     #if DEBUG
     /// DEBUG-only: the lock always tears down after this many seconds, no matter
@@ -68,8 +71,12 @@ final class LockController: ObservableObject {
         tap.onUnlockChord = { [weak self] in
             Task { @MainActor in self?.requestUnlock() }
         }
+        tap.onTapReenabled = { [weak self] message in
+            self?.tapRecoveryNotice = message
+        }
         installTerminationHandler()
         installLockHotKeyMonitor()
+        inactivity.start(settings: settings, lock: self)
     }
 
     /// Optional system-wide hotkey that STARTS a lock. A non-consuming global
@@ -113,13 +120,12 @@ final class LockController: ObservableObject {
     func lock() {
         guard state == .unlocked else { return }
 
-        // Without BOTH permissions the tap can't suppress input. Prompt, then
-        // show the recovery state — never a lock the user can't escape.
+        // Without Accessibility the tap can't suppress input. Prompt, then show
+        // the recovery state — never a lock the user can't escape.
         guard permissions.allGranted else {
             permissions.requestAccessibility()
-            permissions.requestInputMonitoring()
             enterRecovery("""
-                Frost needs Accessibility and Input Monitoring. Enable both for \
+                Frost needs Accessibility. Enable it for \
                 Frost in System Settings → Privacy & Security, then choose Lock \
                 Input again. (Relaunching Frost may be required after granting.)
                 """)
@@ -131,19 +137,19 @@ final class LockController: ObservableObject {
 
         guard tap.start() else {
             enterRecovery("""
-                Couldn't create the input tap. Confirm Accessibility and Input \
-                Monitoring are enabled for Frost, then try again. Input is NOT \
-                locked.
+                Couldn't create the input tap. Confirm Accessibility is enabled \
+                for Frost, then try again. Input is NOT locked.
                 """)
             return
         }
 
         // Input is now suppressed — arm the safety net BEFORE anything else.
         startDebugAutoUnlock()
-        overlay.present(controller: self)
         enterKioskMode()
+        overlay.present(controller: self)
         sleep.apply(preventScreenSaver: settings.preventScreenSaver,
                     preventSleep: settings.preventSleep)
+        tapRecoveryNotice = nil
         state = .locked
         log.info("Locked")
     }
@@ -177,6 +183,8 @@ final class LockController: ObservableObject {
 
     func requestUnlock() {
         guard state == .locked else { return }
+        authenticationTask?.cancel()
+        authenticationTask = nil
         state = .authenticating
 
         // Keep the screen covered and input frozen while the Touch ID prompt is
@@ -185,9 +193,11 @@ final class LockController: ObservableObject {
         // Touch ID sensor is hardware and works behind the overlay.
         tap.setAuthenticating(true)
 
-        Task { [weak self] in
+        authenticationTask = Task { [weak self] in
             guard let self else { return }
             let ok = await self.unlocker.authenticate(reason: "Unlock Frost")
+            if Task.isCancelled { return }
+            self.authenticationTask = nil
             guard self.state == .authenticating else { return } // safety net won the race
             if ok { self.finishUnlock() } else { self.reLock() }
         }
@@ -231,6 +241,9 @@ final class LockController: ObservableObject {
         exitKioskMode()
         sleep.releaseAll()
         tap.stop()
+        authenticationTask?.cancel()
+        authenticationTask = nil
+        tapRecoveryNotice = nil
         unlocker.cancel()
         overlay.dismiss()
         state = .unlocked

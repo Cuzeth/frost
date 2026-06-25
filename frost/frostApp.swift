@@ -15,6 +15,7 @@ struct frostApp: App {
     // starts (and begins its scheduled background checks) at launch.
     @StateObject private var updater: UpdaterController
     @StateObject private var settings: SettingsStore
+    @StateObject private var launchAtLogin: LaunchAtLoginManager
     @StateObject private var lock: LockController
     // Backed by UserDefaults (not the @Published store) so writing it back from
     // MenuBarExtra(isInserted:) during a scene update doesn't publish a change.
@@ -25,10 +26,15 @@ struct frostApp: App {
         // user's shortcuts/power preferences from the same instance the
         // Settings window edits.
         let settings = SettingsStore()
+        let launchAtLogin = LaunchAtLoginManager()
         _settings = StateObject(wrappedValue: settings)
+        _launchAtLogin = StateObject(wrappedValue: launchAtLogin)
         _updater = StateObject(wrappedValue: UpdaterController())
         _lock = StateObject(wrappedValue: LockController(settings: settings))
-        SettingsWindowController.shared.configure(settings: settings)
+        SettingsWindowController.shared.configure(
+            settings: settings,
+            launchAtLogin: launchAtLogin
+        )
     }
 
     var body: some Scene {

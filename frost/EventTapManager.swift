@@ -11,9 +11,9 @@
 //  screen is never exposed — but the Esc key is allowed through so the user can
 //  cancel the system Touch ID / password prompt and stay locked.
 //
-//  Placement: we prefer .cghidEventTap (intercepts events BEFORE the system
-//  acts on symbolic hotkeys like Spotlight / Mission Control) and fall back to
-//  .cgSessionEventTap if HID isn't permitted in this context.
+//  Placement: .cgSessionEventTap. The HID-entry tap is earlier in the event
+//  stream, but Apple's SDK requires root for kCGHIDEventTap. Frost deliberately
+//  runs as the logged-in user, so the session-level tap is the honest target.
 //
 //  The tap source is added to the MAIN run loop, so the C callback runs on the
 //  main thread; we assert main-actor isolation to call back into this class.
@@ -30,6 +30,8 @@ private let kEscapeKeyCode: Int64 = 0x35
 final class EventTapManager {
     /// Invoked on the main actor when the unlock shortcut is pressed.
     var onUnlockChord: (() -> Void)?
+    /// Invoked if macOS disables the tap and Frost re-enables it.
+    var onTapReenabled: ((String) -> Void)?
 
     /// The shortcut that triggers unlock, recognized inside the callback while
     /// input is suppressed. Set by LockController from the user's settings.
@@ -49,7 +51,7 @@ final class EventTapManager {
     private(set) var isRunning = false
 
     /// Creates and enables the tap. Returns `false` if creation fails at every
-    /// placement — almost always missing Accessibility / Input Monitoring. The
+    /// placement — almost always missing Accessibility. The
     /// caller MUST then surface the recovery state; input is NOT suppressed.
     func start() -> Bool {
         guard tap == nil else { return true }
@@ -71,25 +73,15 @@ final class EventTapManager {
             (1 << CGEventType.scrollWheel.rawValue)
         )
 
-        var created: CFMachPort?
-        var usedLocation: CGEventTapLocation = .cgSessionEventTap
-        for location in [CGEventTapLocation.cghidEventTap, .cgSessionEventTap] {
-            if let port = CGEvent.tapCreate(
-                tap: location,
-                place: .headInsertEventTap,
-                options: .defaultTap,
-                eventsOfInterest: mask,
-                callback: frostEventTapCallback,
-                userInfo: Unmanaged.passUnretained(self).toOpaque()
-            ) {
-                created = port
-                usedLocation = location
-                break
-            }
-        }
-
-        guard let port = created else {
-            log.error("CGEvent.tapCreate failed at all placements (missing permission?)")
+        guard let port = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: frostEventTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            log.error("CGEvent.tapCreate failed (missing Accessibility?)")
             return false
         }
 
@@ -103,8 +95,7 @@ final class EventTapManager {
         isRunning = true
         setCursorFrozen(true)
 
-        let levelName = usedLocation == .cghidEventTap ? "HID" : "session"
-        log.info("Event tap started at \(levelName, privacy: .public) level")
+        log.info("Event tap started at session level")
         return true
     }
 
@@ -146,11 +137,14 @@ final class EventTapManager {
     fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            // Re-enable ONLY if we still intend to suppress. Never fight an
-            // intentional disable (e.g. while authenticating).
             if shouldSuppress, let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
+                setCursorFrozen(true)
+                let message = type == .tapDisabledByTimeout
+                    ? "The input tap was disabled by macOS after it stopped responding, then re-enabled."
+                    : "The input tap was disabled by macOS, then re-enabled."
                 log.error("Tap disabled by system; re-enabled")
+                Task { @MainActor [weak self] in self?.onTapReenabled?(message) }
             }
             return false
         case .keyDown:

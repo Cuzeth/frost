@@ -4,7 +4,8 @@
 //
 //  Owns the borderless overlay windows — one per display, each joining all
 //  Spaces, so the dim covers every desktop and monitor. Rebuilt on display
-//  changes. (Notch safe-area handling still TODO.)
+//  changes. Content is placed inside each screen's safe area so the central
+//  affordance does not sit under a notched display housing.
 //
 //  The overlay is intentionally semi-transparent: Frost keeps the display
 //  VISIBLE while input is locked, so you can watch whatever is running.
@@ -34,7 +35,15 @@ final class OverlayCoordinator: NSObject {
     /// Hide/show every overlay window — used to reveal the screen during auth.
     func setVisible(_ visible: Bool) {
         for window in windows {
-            if visible { window.orderFrontRegardless() } else { window.orderOut(nil) }
+            if visible {
+                if window == windows.first {
+                    window.makeKeyAndOrderFront(nil)
+                } else {
+                    window.orderFrontRegardless()
+                }
+            } else {
+                window.orderOut(nil)
+            }
         }
     }
 
@@ -62,10 +71,10 @@ final class OverlayCoordinator: NSObject {
     }
 
     private func makeWindow(for screen: NSScreen, controller: LockController) -> NSWindow {
-        let window = NSWindow(contentRect: screen.frame,
-                              styleMask: .borderless,
-                              backing: .buffered,
-                              defer: false)
+        let window = OverlayWindow(contentRect: screen.frame,
+                                   styleMask: .borderless,
+                                   backing: .buffered,
+                                   defer: false)
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
@@ -73,9 +82,23 @@ final class OverlayCoordinator: NSObject {
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         window.ignoresMouseEvents = false   // recovery buttons must be clickable
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: LockOverlayView(controller: controller))
+        window.contentView = NSHostingView(rootView: LockOverlayView(
+            controller: controller,
+            safeAreaInsets: screen.safeAreaInsets.swiftUIInsets
+        ))
         window.setFrame(screen.frame, display: true)
         return window
+    }
+}
+
+private final class OverlayWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+private extension NSEdgeInsets {
+    var swiftUIInsets: EdgeInsets {
+        EdgeInsets(top: top, leading: left, bottom: bottom, trailing: right)
     }
 }
 
@@ -83,11 +106,14 @@ final class OverlayCoordinator: NSObject {
 
 struct LockOverlayView: View {
     @ObservedObject var controller: LockController
+    var safeAreaInsets: EdgeInsets
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.35).ignoresSafeArea()
             card
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(safeAreaInsets)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -117,6 +143,12 @@ struct LockOverlayView: View {
                 .multilineTextAlignment(.center)
             if authenticating {
                 ProgressView().padding(.top, 4)
+            }
+            if let notice = controller.tapRecoveryNotice {
+                Text(notice)
+                    .font(.footnote)
+                    .foregroundStyle(.yellow)
+                    .multilineTextAlignment(.center)
             }
             #if DEBUG
             if let seconds = controller.debugSecondsRemaining {

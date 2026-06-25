@@ -5,6 +5,7 @@
 //  User-facing preferences, persisted to UserDefaults:
 //    • unlockShortcut    — REQUIRED; recognized inside the event tap to unlock.
 //    • lockShortcut      — OPTIONAL; a global hotkey that starts a lock.
+//    • inactivityLock    — OPTIONAL; locks after session idle time exceeds it.
 //    • preventScreenSaver / preventSleep — power assertions held while locked.
 //
 //  Published so the Settings UI updates live; LockController reads the current
@@ -22,6 +23,9 @@ final class SettingsStore: ObservableObject {
     }
     @Published var lockShortcut: Shortcut? {
         didSet { write(lockShortcut, forKey: Key.lockShortcut) }
+    }
+    @Published var inactivityLock: InactivityLockOption {
+        didSet { defaults.set(inactivityLock.rawValue, forKey: Key.inactivityLock) }
     }
     @Published var preventScreenSaver: Bool {
         didSet { defaults.set(preventScreenSaver, forKey: Key.preventScreenSaver) }
@@ -42,6 +46,7 @@ final class SettingsStore: ObservableObject {
     private enum Key {
         static let unlockShortcut = "unlockShortcut"
         static let lockShortcut = "lockShortcut"
+        static let inactivityLock = "inactivityLock"
         static let preventScreenSaver = "preventScreenSaver"
         static let preventSleep = "preventSleep"
     }
@@ -51,6 +56,9 @@ final class SettingsStore: ObservableObject {
         // didSet does not fire during init, so these loads never re-persist.
         self.unlockShortcut = Self.read(Key.unlockShortcut, from: defaults) ?? .defaultUnlock
         self.lockShortcut = Self.read(Key.lockShortcut, from: defaults)
+        self.inactivityLock = InactivityLockOption(
+            rawValue: defaults.integer(forKey: Key.inactivityLock)
+        ) ?? .off
         self.preventScreenSaver = defaults.bool(forKey: Key.preventScreenSaver)
         self.preventSleep = defaults.bool(forKey: Key.preventSleep)
     }

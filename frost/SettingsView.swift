@@ -11,6 +11,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
+    @ObservedObject var launchAtLogin: LaunchAtLoginManager
     // Shares the menu-bar flag with the App via UserDefaults (see SettingsStore).
     @AppStorage(SettingsStore.showInMenuBarKey) private var showInMenuBar = true
 
@@ -45,6 +46,20 @@ struct SettingsView: View {
             }
 
             Section {
+                Picker("Auto-lock", selection: $settings.inactivityLock) {
+                    ForEach(InactivityLockOption.allCases) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                Text("Inactivity")
+            } footer: {
+                Text("Locks input after the Mac has been idle for the selected time.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Prevent screen saver", isOn: $settings.preventScreenSaver)
                 Toggle("Prevent sleep", isOn: $settings.preventSleep)
             } header: {
@@ -52,6 +67,28 @@ struct SettingsView: View {
             } footer: {
                 Text("Keep the screen on and the Mac awake while input is locked. Released automatically on unlock.")
                     .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Launch at login", isOn: Binding(
+                    get: { launchAtLogin.isEnabled },
+                    set: { launchAtLogin.setEnabled($0) }
+                ))
+                if launchAtLogin.requiresApproval {
+                    Button("Open Login Items Settings") {
+                        launchAtLogin.openLoginItemsSettings()
+                    }
+                }
+            } header: {
+                Text("Startup")
+            } footer: {
+                if let message = launchAtLogin.errorMessage {
+                    Text(message)
+                        .foregroundStyle(.red)
+                } else if launchAtLogin.requiresApproval {
+                    Text("macOS needs approval in Login Items before Frost can launch at login.")
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -74,6 +111,7 @@ struct SettingsView: View {
             // An LSUIElement agent doesn't auto-focus its windows; pull the
             // Settings window to the front so the user can interact with it.
             NSApp.activate(ignoringOtherApps: true)
+            launchAtLogin.refresh()
         }
     }
 

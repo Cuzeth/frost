@@ -35,7 +35,7 @@ Frost is a focused macOS app in active development.
 
 When you choose **Lock Input**, Frost:
 
-1. Checks that Accessibility and Input Monitoring are granted.
+1. Checks that Accessibility is granted.
 2. Creates an active `CGEvent` tap.
 3. Suppresses keyboard and pointer events by swallowing them in the tap callback.
 4. Freezes the cursor position.
@@ -114,6 +114,10 @@ If Frost cannot acquire the required permissions or cannot create an event tap,
 it does not lock input. Instead, it shows an **Input Not Locked** recovery overlay
 with guidance and a button to open Privacy settings.
 
+If macOS disables the event tap while Frost is already locked, Frost attempts to
+re-enable it immediately and shows a visible warning on the overlay. If the tap
+cannot be created at all, Frost does not lock input.
+
 ### Force Quit
 
 Frost disables the Force Quit panel while locked. This is intentional: opening
@@ -123,19 +127,18 @@ in debug builds, or the `SIGTERM` path above.
 
 ## Permissions
 
-Frost needs two user-granted macOS privacy permissions:
+Frost needs one user-granted macOS privacy permission:
 
 - Accessibility: required for an active event tap to alter or suppress events.
-- Input Monitoring: required to receive keyboard events in the tap.
 
-They are granted in:
+It is granted in:
 
 ```text
 System Settings > Privacy & Security
 ```
 
-If either permission is missing, Frost prompts where macOS allows it, then shows
-the recovery overlay instead of suppressing input.
+If Accessibility is missing, Frost prompts where macOS allows it, then shows the
+recovery overlay instead of suppressing input.
 
 ## Settings
 
@@ -146,8 +149,10 @@ Current settings:
 
 - Unlock Shortcut: required; defaults to `Control-Option-Command-U`.
 - Lock Shortcut: optional global shortcut that starts input suppression.
+- Auto-lock: optional inactivity timer.
 - Prevent screen saver: holds a display-sleep prevention assertion while locked.
 - Prevent sleep: holds an idle system-sleep prevention assertion while locked.
+- Launch at login: registers Frost as a main-app login item with `SMAppService`.
 - Show in menu bar: controls whether the menu-bar item is visible.
 - Quit Frost: exits the menu-bar agent from the settings window.
 
@@ -173,16 +178,18 @@ settings window.
 
 ### Input Suppression
 
-`EventTapManager` owns the `CGEvent` tap. It prefers a HID-level tap and falls
-back to a session-level tap if needed:
+`EventTapManager` owns a session-level `CGEvent` tap:
 
-- `CGEventTapLocation.cghidEventTap`
 - `CGEventTapLocation.cgSessionEventTap`
 - `.headInsertEventTap`
 - `.defaultTap`
 
 Returning `nil` from the callback swallows input. The callback recognizes the
 unlock shortcut before swallowing the key event.
+
+Frost deliberately does not use `CGEventTapLocation.cghidEventTap`: Apple's SDK
+requires root for that earlier tap location, and Frost runs as the logged-in
+user.
 
 During authentication, the tap remains active and the overlay remains visible.
 Bare Escape is allowed through so the system authentication prompt can be
@@ -198,6 +205,7 @@ Overlay windows:
 - join all Spaces
 - support full-screen auxiliary presentation
 - rebuild when screen parameters change
+- place the central affordance inside each display's safe area
 - use a translucent material card so the underlying screen remains visible
 
 The normal locked overlay is informational. Recovery overlays are interactive
@@ -256,6 +264,16 @@ https://updates.abdeen.dev/frost/appcast.xml
 Do not replace `SUPublicEDKey`. It is the public EdDSA key used to verify
 updates for existing installs.
 
+Sparkle also supports hardening keys such as `SURequireSignedFeed` and
+`SUVerifyUpdateBeforeExtraction`. Frost has not added those explicit keys yet;
+when added, they should be verified against Sparkle's current defaults and
+release pipeline rather than cargo-culted from an older plan.
+
+### Privacy Manifest
+
+`PrivacyInfo.xcprivacy` declares no tracking, no tracking domains, no collected
+data types, and UserDefaults access for Frost's own settings.
+
 ## Source Map
 
 - `frost/frostApp.swift`: app entry point, menu-bar item, shared controllers.
@@ -265,10 +283,13 @@ updates for existing installs.
 - `frost/SettingsStore.swift`: persisted user preferences.
 - `frost/LockController.swift`: lock-session state machine and teardown owner.
 - `frost/EventTapManager.swift`: active `CGEvent` tap and unlock shortcut handling.
+- `frost/InactivityLockMonitor.swift`: idle-time polling for optional auto-lock.
+- `frost/InactivityLockOption.swift`: persisted inactivity timeout choices.
+- `frost/LaunchAtLoginManager.swift`: `SMAppService.mainApp` wrapper.
 - `frost/OverlayCoordinator.swift`: per-display overlay windows and recovery UI.
 - `frost/UnlockCoordinator.swift`: LocalAuthentication wrapper.
 - `frost/SleepAssertionManager.swift`: display and system idle assertions.
-- `frost/PermissionManager.swift`: Accessibility and Input Monitoring checks.
+- `frost/PermissionManager.swift`: Accessibility checks.
 - `frost/Shortcut.swift`: shortcut persistence, matching, and display.
 - `frost/ShortcutRecorder.swift`: AppKit-backed shortcut recorder control.
 - `frost/UpdaterController.swift`: Sparkle update wrapper.
@@ -279,7 +300,7 @@ updates for existing installs.
 1. Open `frost.xcodeproj` in Xcode.
 2. Select the `frost` target/scheme.
 3. Build and run.
-4. Grant Accessibility and Input Monitoring when prompted.
+4. Grant Accessibility when prompted.
 5. If macOS does not activate the new permissions immediately, relaunch Frost.
 
 Important project settings:
@@ -289,6 +310,7 @@ Important project settings:
 - `ENABLE_HARDENED_RUNTIME = YES`
 - `INFOPLIST_KEY_LSUIElement = YES`
 - Sparkle is resolved through Swift Package Manager.
+- `PrivacyInfo.xcprivacy` is bundled from the synchronized `frost` folder.
 
 For AI agents and automated edits, read `AGENTS.md` before touching the project.
 It contains the safety invariants that must not regress.
@@ -327,6 +349,8 @@ repository.
 - Preserve the debug auto-unlock timer in debug builds only.
 - Never start suppressing input without a visible recovery path for startup
   failures.
+- If the tap is disabled while locked, re-enable it and show a visible overlay
+  warning instead of silently treating the lock as healthy.
 - Always release the event tap, restore the cursor, clear presentation options,
   and release power assertions during teardown.
 - Keep the app non-sandboxed.
@@ -339,7 +363,8 @@ repository.
 
 ## Current Gaps
 
-- Launch at login is not implemented yet.
-- Notched-display safe-area handling is still called out as TODO in the overlay
-  coordinator.
 - There is no test target in the current project.
+- Sparkle hardening keys are not set explicitly yet.
+- Embedded overlay-level authentication is not active; Frost currently uses the
+  standard LocalAuthentication prompt because the embedded experiment did not
+  unlock reliably in testing.

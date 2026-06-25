@@ -20,7 +20,7 @@ Input suppression can trap the user with no way to type or click. Every change m
 
 1. **Remote kill (SIGTERM).** Frost catches `SIGTERM` and tears the lock down cleanly (restores the cursor, releases the tap) before exiting, independent of app state. Because the event tap blocks *local* input, the realistic way to trigger it is **over SSH from another device** (`pkill -x frost` / `kill <pid>`), or from a terminal you opened before locking — document it that way. (There is intentionally no in-repo killswitch script; the SIGTERM handler is the contract.)
 2. **Debug auto-unlock timer.** In DEBUG builds, a timer tears the lock down after N seconds regardless of auth. It must be present from the very first line of tap code and must never compile into release builds (`#if DEBUG`).
-3. **Visible recovery state.** If the event tap can't be created, or gets disabled (`tapDisabledByTimeout` / `tapDisabledByUserInput`), the overlay must show a clear, visible "input unavailable / how to recover" state rather than silently trapping input.
+3. **Visible recovery / warning state.** If the event tap can't be created, the overlay must show a clear, visible "input unavailable / how to recover" recovery state rather than silently trapping input. If the tap gets disabled (`tapDisabledByTimeout` / `tapDisabledByUserInput`) while locked, re-enable it and show a visible warning on the overlay.
 
 Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPresentationOptions.disableForceQuit`): opening it steals focus from the Touch ID prompt and strands the user. The escape hatches above replace it. Order of implementation is fixed: **SIGTERM handler → debug auto-unlock → recovery UI come before any input-suppressing code.**
 
@@ -34,17 +34,17 @@ Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPr
 
 ## Core APIs (intended implementation)
 
-- **Input suppression:** `CGEvent.tapCreate` with `.cgSessionEventTap` + `.headInsertEventTap` + `.defaultTap` — an *active* tap; suppress by returning `nil` from the callback. Re-enable on `tapDisabledByTimeout` / `tapDisabledByUserInput` via `CGEvent.tapEnable`.
+- **Input suppression:** `CGEvent.tapCreate` with `.cgSessionEventTap` + `.headInsertEventTap` + `.defaultTap` — an *active* session-level tap; suppress by returning `nil` from the callback. Re-enable on `tapDisabledByTimeout` / `tapDisabledByUserInput` and make that visible in the overlay. Do not switch to `.cghidEventTap` without explicitly accepting a root/privileged architecture.
 - **Overlays:** one borderless `NSWindow` per `NSScreen`, level `.screenSaver`, collection behavior `canJoinAllSpaces` + `fullScreenAuxiliary`. Rebuild on `NSApplication.didChangeScreenParametersNotification`. Respect `safeAreaInsets` for notched displays.
-- **Unlock:** `LAContext.evaluatePolicy(.deviceOwnerAuthentication)` (Touch ID, password fallback). The unlock hotkey is recognized **inside** the event-tap callback (keycodes + modifier flags), because normal key/menu routing is dead while input is suppressed. Pointer events pass through **only** when a click lands inside the on-screen unlock control's frame; everything else is swallowed.
+- **Unlock:** `LAContext.evaluatePolicy(.deviceOwnerAuthentication)` (Touch ID, password fallback). The unlock hotkey is recognized **inside** the event-tap callback (keycodes + modifier flags), because normal key/menu routing is dead while input is suppressed. Pointer events are swallowed while locked; do not add mouse click-through unless the tap/overlay safety story is redesigned.
 - **Sleep:** `IOPMAssertionCreateWithName`, type switchable between `kIOPMAssertionTypeNoDisplaySleep` and `kIOPMAssertionTypeNoIdleSleep`. Acquire on lock, release on unlock/terminate. **Do not** claim lid-closed operation.
-- **Permissions:** Accessibility via `AXIsProcessTrustedWithOptions`; Input Monitoring via `CGPreflightListenEventAccess` / `CGRequestListenEventAccess`.
+- **Permissions:** Accessibility via `AXIsProcessTrustedWithOptions`. Do not gate Frost on Input Monitoring unless the event-tap architecture changes and testing proves it is required.
 - **Updates:** Sparkle `SPUStandardUpdaterController` with a "Check for Updates…" menu item.
-- **Launch at login (later):** `SMAppService.mainApp`.
+- **Launch at login:** `SMAppService.mainApp`.
 
 ## Modules
 
-`PermissionManager`, `OverlayCoordinator`, `EventTapManager`, `UnlockCoordinator`, `SleepAssertionManager`, `LaunchAtLoginManager`, `SettingsStore`, and `UpdaterController` (wraps Sparkle).
+`PermissionManager`, `OverlayCoordinator`, `EventTapManager`, `UnlockCoordinator`, `SleepAssertionManager`, `InactivityLockMonitor`, `LaunchAtLoginManager`, `SettingsStore`, and `UpdaterController` (wraps Sparkle).
 
 ## Signing & secrets
 

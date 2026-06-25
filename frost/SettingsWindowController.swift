@@ -14,13 +14,15 @@ final class SettingsWindowController {
     static let shared = SettingsWindowController()
 
     private var settings: SettingsStore?
+    private var launchAtLogin: LaunchAtLoginManager?
     private var pendingShow = false
     private var windowController: NSWindowController?
 
     private init() {}
 
-    func configure(settings: SettingsStore) {
+    func configure(settings: SettingsStore, launchAtLogin: LaunchAtLoginManager) {
         self.settings = settings
+        self.launchAtLogin = launchAtLogin
         if pendingShow {
             pendingShow = false
             show()
@@ -28,13 +30,16 @@ final class SettingsWindowController {
     }
 
     func show() {
-        guard let settings else {
+        guard let settings, let launchAtLogin else {
             pendingShow = true
             return
         }
 
         if windowController == nil {
-            windowController = makeWindowController(settings: settings)
+            windowController = makeWindowController(
+                settings: settings,
+                launchAtLogin: launchAtLogin
+            )
         }
 
         NSApp.activate(ignoringOtherApps: true)
@@ -42,8 +47,14 @@ final class SettingsWindowController {
         windowController?.window?.makeKeyAndOrderFront(nil)
     }
 
-    private func makeWindowController(settings: SettingsStore) -> NSWindowController {
-        let hostingController = NSHostingController(rootView: SettingsView(settings: settings))
+    private func makeWindowController(
+        settings: SettingsStore,
+        launchAtLogin: LaunchAtLoginManager
+    ) -> NSWindowController {
+        let hostingController = NSHostingController(rootView: SettingsView(
+            settings: settings,
+            launchAtLogin: launchAtLogin
+        ))
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Frost Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]

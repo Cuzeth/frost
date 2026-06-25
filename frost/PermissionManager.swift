@@ -2,16 +2,12 @@
 //  PermissionManager.swift
 //  frost
 //
-//  Checks and requests the two permissions an active (suppressing) event tap
-//  needs:
-//    • Accessibility   — required for a .defaultTap to ALTER/suppress events.
-//    • Input Monitoring — required to RECEIVE keyboard events in the tap.
-//  Both are TCC-mediated and granted by the user in System Settings →
-//  Privacy & Security. Neither is an entitlement.
+//  Checks and requests the permission an active (suppressing) session event tap
+//  needs. Accessibility is TCC-mediated and granted by the user in System
+//  Settings → Privacy & Security. It is not an entitlement.
 //
 
 import ApplicationServices
-import CoreGraphics
 
 @MainActor
 final class PermissionManager {
@@ -27,18 +23,7 @@ final class PermissionManager {
         return AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }
 
-    /// Input Monitoring access (`CGPreflightListenEventAccess`).
-    func hasInputMonitoring() -> Bool {
-        CGPreflightListenEventAccess()
-    }
-
-    /// Shows the system Input Monitoring prompt if not yet granted.
-    @discardableResult
-    func requestInputMonitoring() -> Bool {
-        CGRequestListenEventAccess()
-    }
-
     var allGranted: Bool {
-        hasAccessibility() && hasInputMonitoring()
+        hasAccessibility()
     }
 }
