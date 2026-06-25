@@ -60,3 +60,29 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# ---- Frost: signing material, Sparkle keys, release artifacts ----
+# NEVER commit the Sparkle EdDSA private key. `generate_keys` stores it in the
+# login Keychain by default; if it is ever exported to a file, keep it out of
+# git. These patterns are a backstop, not a license to export the key.
+*.pem
+*_priv.pem
+eddsa_priv*
+sparkle_priv*
+*private_key*
+*.p12
+*.cer
+*.certSigningRequest
+
+# Release output produced by scripts/publish.sh
+dist/
+*.dmg
+*.zip
+
+# Build / archive / notarization byproducts
+build/
+DerivedData/
+*.xcarchive
+
+# macOS
+.DS_Store
