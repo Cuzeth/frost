@@ -65,7 +65,7 @@ export DOWNLOAD_URL_PREFIX="https://github.com/$REPO_SLUG/releases/download/$TAG
 "$REPO_ROOT/scripts/publish.sh" "$APP_PATH"
 
 # --- 2. GitHub Release (uploads the DMG) ------------------------------------
-echo "Creating GitHub release $TAG…"
+echo "Creating GitHub release ${TAG}..."
 gh release create "$TAG" "$DMG" \
   --repo "$REPO_SLUG" \
   --title "Frost $VERSION" \
@@ -106,4 +106,4 @@ echo "Done."
 echo "  Release: https://github.com/$REPO_SLUG/releases/tag/$TAG"
 echo "  Appcast: https://updates.abdeen.dev/frost/appcast.xml"
 echo "  Verify:  open the release page, confirm the .dmg downloads, then check an"
-echo "           older build sees the update via Check for Updates…"
+echo "           older build sees the update via Check for Updates..."
