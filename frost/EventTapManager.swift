@@ -46,6 +46,7 @@ final class EventTapManager {
     /// system Touch ID / password prompt can be cancelled). Everything else stays
     /// suppressed and the cursor stays frozen — the screen is never exposed.
     private var passEscapeToSystem = false
+    private var lockedCursorPosition: CGPoint?
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "EventTap")
 
     private(set) var isRunning = false
@@ -93,7 +94,9 @@ final class EventTapManager {
         runLoopSource = source
         shouldSuppress = true
         isRunning = true
+        lockedCursorPosition = CGEvent(source: nil)?.location
         setCursorFrozen(true)
+        pinCursor()
 
         log.info("Event tap started at session level")
         return true
@@ -120,6 +123,7 @@ final class EventTapManager {
         runLoopSource = nil
         tap = nil
         isRunning = false
+        lockedCursorPosition = nil
         setCursorFrozen(false)   // ALWAYS restore the cursor
         log.info("Event tap stopped")
     }
@@ -129,6 +133,12 @@ final class EventTapManager {
     // decoupling the device from the cursor is what actually freezes it.
     private func setCursorFrozen(_ frozen: Bool) {
         _ = CGAssociateMouseAndMouseCursorPosition(frozen ? 0 : 1)
+    }
+
+    private func pinCursor() {
+        guard let lockedCursorPosition else { return }
+        CGWarpMouseCursorPosition(lockedCursorPosition)
+        setCursorFrozen(true)
     }
 
     // MARK: - Callback handling (main actor)
@@ -144,6 +154,7 @@ final class EventTapManager {
                     ? "The input tap was disabled by macOS after it stopped responding, then re-enabled."
                     : "The input tap was disabled by macOS, then re-enabled."
                 log.error("Tap disabled by system; re-enabled")
+                pinCursor()
                 Task { @MainActor [weak self] in self?.onTapReenabled?(message) }
             }
             return false
@@ -157,7 +168,22 @@ final class EventTapManager {
             if passEscapeToSystem, isEscape(event) { return false }
             return true
         default:
+            if isPointerEvent(type) { pinCursor() }
             return true
+        }
+    }
+
+    private func isPointerEvent(_ type: CGEventType) -> Bool {
+        switch type {
+        case .leftMouseDown, .leftMouseUp,
+             .rightMouseDown, .rightMouseUp,
+             .otherMouseDown, .otherMouseUp,
+             .mouseMoved,
+             .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
+             .scrollWheel:
+            return true
+        default:
+            return false
         }
     }
 

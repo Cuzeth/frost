@@ -145,8 +145,8 @@ final class LockController: ObservableObject {
 
         // Input is now suppressed — arm the safety net BEFORE anything else.
         startDebugAutoUnlock()
-        enterKioskMode()
         overlay.present(controller: self)
+        enterKioskMode()
         sleep.apply(preventScreenSaver: settings.preventScreenSaver,
                     preventSleep: settings.preventSleep)
         tapRecoveryNotice = nil
