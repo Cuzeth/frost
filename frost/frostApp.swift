@@ -2,19 +2,23 @@
 //  frostApp.swift
 //  frost
 //
-//  Created by Jaafar Abdeen on 6/25/26.
-//
 
 import SwiftUI
 import AppKit
 
 @main
 struct frostApp: App {
+    // Opens Settings on launch/reopen when the menu bar icon is hidden — the
+    // user's only way back in once the icon is gone.
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     // Owns Sparkle for the app's lifetime. Created once here so the updater
     // starts (and begins its scheduled background checks) at launch.
     @StateObject private var updater: UpdaterController
     @StateObject private var settings: SettingsStore
     @StateObject private var lock: LockController
+    // Backed by UserDefaults (not the @Published store) so writing it back from
+    // MenuBarExtra(isInserted:) during a scene update doesn't publish a change.
+    @AppStorage(SettingsStore.showInMenuBarKey) private var showInMenuBar = true
 
     init() {
         // SettingsStore is created first so the lock controller can read the
@@ -28,7 +32,8 @@ struct frostApp: App {
 
     var body: some Scene {
         // LSUIElement agent: no Dock icon, no window — the menu bar is the UI.
-        MenuBarExtra("Frost", image: "MenuBarIcon") {
+        // `isInserted` lets the user hide the icon from Settings.
+        MenuBarExtra("Frost", image: "MenuBarIcon", isInserted: $showInMenuBar) {
             Button(lock.isLocked ? "Locked" : "Lock Input") {
                 lock.lock()
             }

@@ -32,6 +32,13 @@ final class SettingsStore: ObservableObject {
 
     private let defaults: UserDefaults
 
+    /// Key for the menu-bar-visibility flag. Deliberately NOT an @Published here:
+    /// it's read via @AppStorage in the App/Settings views so binding it to
+    /// MenuBarExtra(isInserted:) doesn't publish object changes during a view
+    /// update, and read straight from defaults by AppDelegate at launch (before
+    /// any store exists). Defaults to `true`.
+    static let showInMenuBarKey = "showInMenuBar"
+
     private enum Key {
         static let unlockShortcut = "unlockShortcut"
         static let lockShortcut = "lockShortcut"

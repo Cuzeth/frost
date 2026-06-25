@@ -11,6 +11,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
+    // Shares the menu-bar flag with the App via UserDefaults (see SettingsStore).
+    @AppStorage(SettingsStore.showInMenuBarKey) private var showInMenuBar = true
 
     var body: some View {
         Form {
@@ -50,6 +52,19 @@ struct SettingsView: View {
             } footer: {
                 Text("Keep the screen on and the Mac awake while input is locked. Released automatically on unlock.")
                     .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Show in menu bar", isOn: $showInMenuBar)
+            } header: {
+                Text("Menu Bar")
+            } footer: {
+                Text("When off, the menu bar icon is hidden. Relaunch Frost to reopen this window; use Quit below to stop it.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button("Quit Frost") { NSApp.terminate(nil) }
             }
         }
         .formStyle(.grouped)
