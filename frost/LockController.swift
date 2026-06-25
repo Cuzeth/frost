@@ -7,7 +7,7 @@
 //  the state machine + the DEBUG auto-unlock safety net.
 //
 //  SAFETY: independent ways out of a lock:
-//    1. The unlock chord (⌃⌥⌘U) → Touch ID / password fallback.
+//    1. The unlock chord (⌃⌥⌘U) → Touch ID.
 //    2. The DEBUG auto-unlock timer (debug builds only).
 //    3. Sending SIGTERM (e.g. `pkill -x frost` / `kill` over SSH) — caught
 //       below and torn down cleanly, independent of app state.
@@ -229,8 +229,23 @@ final class LockController: ObservableObject {
 
     // MARK: - Unlock
 
+    /// The unlock shortcut opens the in-overlay Touch ID prompt from the idle
+    /// locked state. Touch ID is not armed automatically, so this is the entry
+    /// point into authentication.
     func requestUnlock() {
         guard state == .locked else { return }
+        armAuthentication()
+    }
+
+    /// Prepares a fresh `LAContext`, flips into the authenticating state, and
+    /// lets Esc through so the embedded Touch ID prompt is live. The
+    /// embedded auth view binds to this context and starts evaluation once it
+    /// reports ready. If the context can't be prepared, returns to the idle
+    /// locked state (with a notice when one is available) so the user is never
+    /// stranded. Only acts from the idle locked state.
+    @discardableResult
+    private func armAuthentication() -> Bool {
+        guard state == .locked else { return false }
         authenticationTask?.cancel()
         authenticationTask = nil
 
@@ -239,10 +254,10 @@ final class LockController: ObservableObject {
             break
         case .unavailable(let message):
             reLock(notice: message)
-            return
+            return false
         case .success, .cancelled, .failed:
             reLock()
-            return
+            return false
         }
 
         state = .authenticating
@@ -251,6 +266,7 @@ final class LockController: ObservableObject {
         // LocalAuthentication view is up. Esc is allowed through so the user can
         // cancel the prompt and remain locked.
         tap.setAuthenticating(true)
+        return true
     }
 
     func authenticationViewReady(for context: LAContext) {
@@ -273,6 +289,7 @@ final class LockController: ObservableObject {
             case .unavailable(let message):
                 self.reLock(notice: message)
             case .cancelled, .failed:
+                // Return to the idle locked state; the shortcut re-opens Touch ID.
                 self.reLock()
             }
         }

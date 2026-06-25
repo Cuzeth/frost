@@ -1,8 +1,8 @@
 # Frost
 
 Frost is a macOS menu-bar input locker. It suppresses keyboard, mouse, and
-trackpad input while keeping the display visible, then unlocks with Touch ID or
-macOS password fallback on Macs with Touch ID.
+trackpad input while keeping the display visible, then unlocks with Touch ID on
+Macs with Touch ID.
 
 It is built for the awkward but useful moment when you want the Mac to keep
 showing an unattended task, but you do not want local input to interfere with it:
@@ -46,14 +46,16 @@ When you choose **Lock Input**, Frost:
 8. Optionally holds power assertions to keep the display and/or system awake.
 9. Waits for the configured unlock shortcut.
 
-When you press the unlock shortcut, Frost keeps the overlay and event tap active,
-then asks macOS to authenticate with
-`LAContext.evaluatePolicy(.deviceOwnerAuthentication)`. Frost binds that context
-to an embedded `LAAuthenticationView` inside the overlay, so the authentication
-affordance stays visible at Frost's overlay level while preserving Touch ID and
-password fallback. If authentication succeeds, Frost tears everything down and
-restores normal input. If it is cancelled or fails, Frost returns to the locked
-state.
+When you press the unlock shortcut, Frost keeps the overlay and event tap active
+and asks macOS to authenticate with
+`LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)` — Touch ID
+only, no password fallback, because keyboard input stays suppressed while locked.
+Frost binds that context to an embedded `LAAuthenticationView` inside the overlay,
+so the Touch ID affordance stays visible at Frost's overlay level. The embedded
+view is placed on the display where the lock was triggered, not always the
+menu-bar display. If authentication succeeds, Frost tears everything down and
+restores normal input. If it is cancelled with Escape, Frost returns to the idle
+locked state and the unlock shortcut re-opens the prompt.
 
 The default unlock shortcut is `Control-Option-Command-U`.
 
@@ -81,8 +83,9 @@ they are part of the project contract.
 
 ### Normal Unlock
 
-Press the configured unlock shortcut, then authenticate with Touch ID or the
-macOS password fallback.
+Press the configured unlock shortcut to open the Touch ID prompt, then
+authenticate with Touch ID. If you cancel the prompt with Escape, press the
+shortcut again to re-open it.
 
 The unlock shortcut is recognized inside the event-tap callback, because normal
 menu and keyboard routing is unavailable while input is suppressed.
@@ -243,14 +246,15 @@ Those options are always cleared during teardown.
 `UnlockCoordinator` wraps LocalAuthentication:
 
 ```swift
-LAContext.evaluatePolicy(.deviceOwnerAuthentication)
+LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)
 ```
 
 Before locking, Frost verifies that the Mac reports Touch ID through
 `.deviceOwnerAuthenticationWithBiometrics`. During unlock, the prepared
-`LAContext` is bound to an embedded `LAAuthenticationView` in the overlay, then
-evaluated with `.deviceOwnerAuthentication` so Touch ID and password fallback
-remain system-owned.
+`LAContext` (with an empty `localizedFallbackTitle`, so no password button) is
+bound to an embedded `LAAuthenticationView` in the overlay, then evaluated with
+`.deviceOwnerAuthenticationWithBiometrics` — Touch ID only, since keyboard input
+stays suppressed while locked.
 
 ### Power Assertions
 

@@ -7,6 +7,11 @@
 //  changes. Content is placed inside each screen's safe area so the central
 //  affordance does not sit under a notched display housing.
 //
+//  The embedded authentication view (and the key window that drives it) live on
+//  the ACTIVE display — the one the pinned cursor is on, i.e. where the lock was
+//  triggered — not always the menu-bar display. Locking from a secondary monitor
+//  must put the Touch ID prompt where the user is looking.
+//
 //  The overlay is intentionally semi-transparent: Frost keeps the display
 //  VISIBLE while input is locked, so you can watch whatever is running.
 //
@@ -19,6 +24,10 @@ import SwiftUI
 @MainActor
 final class OverlayCoordinator: NSObject {
     private var windows: [NSWindow] = []
+    /// Index into `windows` of the active-display window: it hosts the embedded
+    /// authentication view and becomes key so the prompt is focused where the
+    /// user is. Recomputed on every rebuild.
+    private var authenticationWindowIndex = 0
     private weak var controller: LockController?
 
     deinit {
@@ -41,13 +50,14 @@ final class OverlayCoordinator: NSObject {
     }
 
     private func show() {
-        for window in windows {
-            if window == windows.first {
-                window.makeKeyAndOrderFront(nil)
-            } else {
-                window.orderFrontRegardless()
-            }
+        guard !windows.isEmpty else { return }
+        let keyIndex = min(max(authenticationWindowIndex, 0), windows.count - 1)
+        // Order the non-key windows first, then key the active-display window
+        // last so it ends up frontmost and focused.
+        for (index, window) in windows.enumerated() where index != keyIndex {
+            window.orderFrontRegardless()
         }
+        windows[keyIndex].makeKeyAndOrderFront(nil)
     }
 
     func dismiss() {
@@ -68,13 +78,31 @@ final class OverlayCoordinator: NSObject {
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
         guard let controller else { return }
-        for (index, screen) in NSScreen.screens.enumerated() {
+        let screens = NSScreen.screens
+        authenticationWindowIndex = Self.activeScreenIndex(in: screens)
+        for (index, screen) in screens.enumerated() {
             windows.append(makeWindow(
                 for: screen,
                 controller: controller,
-                showsEmbeddedAuthentication: index == 0
+                showsEmbeddedAuthentication: index == authenticationWindowIndex
             ))
         }
+    }
+
+    /// The display the user is on — where the lock was triggered. The cursor is
+    /// pinned for the whole session, so its location stays on the lock-time
+    /// display and the embedded prompt follows it across rebuilds. Falls back to
+    /// the main screen, then the first screen, if the cursor isn't on any screen.
+    private static func activeScreenIndex(in screens: [NSScreen]) -> Int {
+        guard !screens.isEmpty else { return 0 }
+        let mouse = NSEvent.mouseLocation
+        if let index = screens.firstIndex(where: { $0.frame.contains(mouse) }) {
+            return index
+        }
+        if let main = NSScreen.main, let index = screens.firstIndex(of: main) {
+            return index
+        }
+        return 0
     }
 
     private func makeWindow(
@@ -151,7 +179,7 @@ struct LockOverlayView: View {
                     Text(authenticating ? "Authenticate" : "Input Locked")
                         .font(.title2.weight(.semibold))
                     Text(authenticating
-                         ? "Touch ID or password"
+                         ? "Touch ID"
                          : "Keyboard, mouse, and trackpad input are paused")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -221,7 +249,7 @@ struct LockOverlayView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Unlock Shortcut")
                     .font(.headline)
-                Text("Press to open the in-overlay authentication prompt")
+                Text("Press to open the Touch ID prompt")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -241,7 +269,7 @@ struct LockOverlayView: View {
                     onReady: controller.authenticationViewReady
                 )
                 .id(ObjectIdentifier(context))
-                .frame(width: 96, height: 76)
+                .fixedSize()
             } else {
                 Image(systemName: "touchid")
                     .font(.system(size: 44, weight: .semibold))
@@ -249,7 +277,7 @@ struct LockOverlayView: View {
                     .foregroundStyle(Color.accentColor)
             }
 
-            Text("Use Touch ID or the password fallback. Press Esc to cancel and keep input locked.")
+            Text("Use Touch ID. Press Esc to cancel and keep input locked.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -334,18 +362,44 @@ private struct EmbeddedAuthenticationView: NSViewRepresentable {
     let authenticationContext: LAContext
     let onReady: (LAContext) -> Void
 
-    func makeNSView(context: Context) -> LAAuthenticationView {
-        let view = LAAuthenticationView(
+    func makeNSView(context: Context) -> EmbeddedAuthView {
+        // `.regular` keeps the Touch ID control compact enough to sit inside the
+        // card. Combined with `.fixedSize()` on the SwiftUI side, the view is
+        // laid out at its own intrinsic size, so it never overflows its box the
+        // way a `.large` control forced into a smaller frame did.
+        let view = EmbeddedAuthView(
             context: authenticationContext,
-            controlSize: .large
+            controlSize: .regular
         )
         view.setContentHuggingPriority(.required, for: .horizontal)
         view.setContentHuggingPriority(.required, for: .vertical)
-        DispatchQueue.main.async {
-            onReady(authenticationContext)
-        }
+        view.setContentCompressionResistancePriority(.required, for: .horizontal)
+        view.setContentCompressionResistancePriority(.required, for: .vertical)
+        // Start evaluation only once the view has actually joined the window (see
+        // EmbeddedAuthView). Firing from makeNSView was too early on first
+        // presentation: the prompt had nowhere to render, so the first Touch ID
+        // attempt silently no-opped and you had to Esc-cancel and retry.
+        view.onAttachedToWindow = { onReady(authenticationContext) }
         return view
     }
 
-    func updateNSView(_ view: LAAuthenticationView, context: Context) {}
+    func updateNSView(_ view: EmbeddedAuthView, context: Context) {}
+}
+
+/// `LAAuthenticationView` that reports when it has joined a window, so the caller
+/// can defer `evaluatePolicy` until the embedded UI can actually render. The
+/// deferred hop also lets the first layout pass settle before evaluation starts.
+private final class EmbeddedAuthView: LAAuthenticationView {
+    var onAttachedToWindow: (() -> Void)?
+    private var didNotify = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, !didNotify else { return }
+        didNotify = true
+        DispatchQueue.main.async { [weak self] in
+            guard self?.window != nil else { return }
+            self?.onAttachedToWindow?()
+        }
+    }
 }
