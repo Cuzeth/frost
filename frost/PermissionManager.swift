@@ -11,16 +11,20 @@ import ApplicationServices
 
 @MainActor
 final class PermissionManager {
-    /// Accessibility trust (`AXIsProcessTrusted`).
+    /// Accessibility trust without showing the system prompt.
     func hasAccessibility() -> Bool {
-        AXIsProcessTrusted()
+        checkAccessibility(prompt: false)
     }
 
     /// Shows the system Accessibility prompt if not yet granted.
     @discardableResult
     func requestAccessibility() -> Bool {
+        checkAccessibility(prompt: true)
+    }
+
+    private func checkAccessibility(prompt: Bool) -> Bool {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-        return AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+        return AXIsProcessTrustedWithOptions([key: prompt] as CFDictionary)
     }
 
     var allGranted: Bool {

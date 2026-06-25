@@ -15,14 +15,16 @@ final class SettingsWindowController {
 
     private var settings: SettingsStore?
     private var launchAtLogin: LaunchAtLoginManager?
+    private var updater: UpdaterController?
     private var pendingShow = false
     private var windowController: NSWindowController?
 
     private init() {}
 
-    func configure(settings: SettingsStore, launchAtLogin: LaunchAtLoginManager) {
+    func configure(settings: SettingsStore, launchAtLogin: LaunchAtLoginManager, updater: UpdaterController) {
         self.settings = settings
         self.launchAtLogin = launchAtLogin
+        self.updater = updater
         if pendingShow {
             pendingShow = false
             show()
@@ -30,7 +32,7 @@ final class SettingsWindowController {
     }
 
     func show() {
-        guard let settings, let launchAtLogin else {
+        guard let settings, let launchAtLogin, let updater else {
             pendingShow = true
             return
         }
@@ -38,7 +40,8 @@ final class SettingsWindowController {
         if windowController == nil {
             windowController = makeWindowController(
                 settings: settings,
-                launchAtLogin: launchAtLogin
+                launchAtLogin: launchAtLogin,
+                updater: updater
             )
         }
 
@@ -49,11 +52,13 @@ final class SettingsWindowController {
 
     private func makeWindowController(
         settings: SettingsStore,
-        launchAtLogin: LaunchAtLoginManager
+        launchAtLogin: LaunchAtLoginManager,
+        updater: UpdaterController
     ) -> NSWindowController {
         let hostingController = NSHostingController(rootView: SettingsView(
             settings: settings,
-            launchAtLogin: launchAtLogin
+            launchAtLogin: launchAtLogin,
+            updater: updater
         ))
         let window = NSWindow(contentViewController: hostingController)
         window.title = "Frost Settings"
@@ -62,14 +67,43 @@ final class SettingsWindowController {
         window.collectionBehavior = [.moveToActiveSpace]
         window.tabbingMode = .disallowed
         let minimumSize = NSSize(width: 460, height: 320)
+        let maximumContentHeight = Self.maximumContentHeight(minimumHeight: minimumSize.height)
         let fittingSize = hostingController.view.fittingSize
-        window.minSize = minimumSize
+        let contentWidth = max(fittingSize.width, minimumSize.width)
+        window.contentMinSize = minimumSize
+        window.contentMaxSize = NSSize(width: contentWidth, height: maximumContentHeight)
         window.setContentSize(NSSize(
-            width: max(fittingSize.width, minimumSize.width),
-            height: max(fittingSize.height, minimumSize.height)
+            width: contentWidth,
+            height: min(max(fittingSize.height, minimumSize.height), maximumContentHeight)
         ))
-        window.center()
+        Self.center(window)
 
         return NSWindowController(window: window)
+    }
+
+    private static func maximumContentHeight(minimumHeight: CGFloat) -> CGFloat {
+        let margin: CGFloat = 72
+        guard let visibleFrame = preferredScreen()?.visibleFrame else { return minimumHeight }
+        return max(minimumHeight, visibleFrame.height - margin)
+    }
+
+    private static func center(_ window: NSWindow) {
+        guard let visibleFrame = preferredScreen()?.visibleFrame else {
+            window.center()
+            return
+        }
+
+        let frame = window.frame
+        window.setFrameOrigin(NSPoint(
+            x: visibleFrame.midX - frame.width / 2,
+            y: visibleFrame.midY - frame.height / 2
+        ))
+    }
+
+    private static func preferredScreen() -> NSScreen? {
+        let mouseLocation = NSEvent.mouseLocation
+        return NSScreen.screens.first { $0.frame.contains(mouseLocation) }
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
     }
 }

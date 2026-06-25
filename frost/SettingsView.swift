@@ -12,6 +12,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var settings: SettingsStore
     @ObservedObject var launchAtLogin: LaunchAtLoginManager
+    @ObservedObject var updater: UpdaterController
     // Shares the menu-bar flag with the App via UserDefaults (see SettingsStore).
     @AppStorage(SettingsStore.showInMenuBarKey) private var showInMenuBar = true
 
@@ -104,12 +105,22 @@ struct SettingsView: View {
             }
 
             Section {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+            } header: {
+                Text("Updates")
+            } footer: {
+                Text("Frost checks automatically in the background. Use this to check right now.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Button("Quit Frost") { NSApp.terminate(nil) }
             }
         }
         .formStyle(.grouped)
         .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(minHeight: 320)
         .onAppear {
             // An LSUIElement agent doesn't auto-focus its windows; pull the
             // Settings window to the front so the user can interact with it.

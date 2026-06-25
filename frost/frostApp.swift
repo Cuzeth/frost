@@ -27,13 +27,15 @@ struct frostApp: App {
         // Settings window edits.
         let settings = SettingsStore()
         let launchAtLogin = LaunchAtLoginManager()
+        let updater = UpdaterController()
         _settings = StateObject(wrappedValue: settings)
         _launchAtLogin = StateObject(wrappedValue: launchAtLogin)
-        _updater = StateObject(wrappedValue: UpdaterController())
+        _updater = StateObject(wrappedValue: updater)
         _lock = StateObject(wrappedValue: LockController(settings: settings))
         SettingsWindowController.shared.configure(
             settings: settings,
-            launchAtLogin: launchAtLogin
+            launchAtLogin: launchAtLogin,
+            updater: updater
         )
     }
 
