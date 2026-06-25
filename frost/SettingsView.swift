@@ -18,25 +18,28 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
-                LabeledContent("Unlock") {
+                HStack {
+                    Text("Unlock")
+                    Spacer()
                     ShortcutRecorder(shortcut: unlockBinding, allowsClear: false)
                         .frame(width: 170, height: 24)
                 }
+                Toggle("Start Touch ID automatically when locked", isOn: $settings.startTouchIDWhenLocked)
             } header: {
-                Text("Unlock Shortcut")
+                Text("Unlock")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Frost requires a Mac with Touch ID.")
+                Text("Required. Press this while locked to bring up Touch ID. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.")
                     .foregroundStyle(.secondary)
             }
 
             Section {
-                LabeledContent("Lock") {
-                    HStack(spacing: 8) {
-                        ShortcutRecorder(shortcut: lockBinding, allowsClear: true)
-                            .frame(width: 170, height: 24)
-                        Button("Clear") { settings.lockShortcut = nil }
-                            .disabled(settings.lockShortcut == nil)
-                    }
+                HStack {
+                    Text("Lock")
+                    Spacer()
+                    ShortcutRecorder(shortcut: lockBinding, allowsClear: true)
+                        .frame(width: 170, height: 24)
+                    Button("Clear") { settings.lockShortcut = nil }
+                        .disabled(settings.lockShortcut == nil)
                 }
             } header: {
                 Text("Lock Shortcut")

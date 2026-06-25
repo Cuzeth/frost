@@ -6,6 +6,8 @@
 //    • unlockShortcut    — REQUIRED; recognized inside the event tap to unlock.
 //    • lockShortcut      — OPTIONAL; a global hotkey that starts a lock.
 //    • inactivityLock    — OPTIONAL; locks after session idle time exceeds it.
+//    • startTouchIDWhenLocked — OPTIONAL; opens Touch ID as soon as a lock begins
+//                          instead of waiting for the unlock shortcut.
 //    • preventScreenSaver / preventSleep — power assertions held while locked.
 //
 //  Published so the Settings UI updates live; LockController reads the current
@@ -27,6 +29,9 @@ final class SettingsStore: ObservableObject {
     @Published var inactivityLock: InactivityLockOption {
         didSet { defaults.set(inactivityLock.rawValue, forKey: Key.inactivityLock) }
     }
+    @Published var startTouchIDWhenLocked: Bool {
+        didSet { defaults.set(startTouchIDWhenLocked, forKey: Key.startTouchIDWhenLocked) }
+    }
     @Published var preventScreenSaver: Bool {
         didSet { defaults.set(preventScreenSaver, forKey: Key.preventScreenSaver) }
     }
@@ -47,6 +52,7 @@ final class SettingsStore: ObservableObject {
         static let unlockShortcut = "unlockShortcut"
         static let lockShortcut = "lockShortcut"
         static let inactivityLock = "inactivityLock"
+        static let startTouchIDWhenLocked = "startTouchIDWhenLocked"
         static let preventScreenSaver = "preventScreenSaver"
         static let preventSleep = "preventSleep"
     }
@@ -59,6 +65,7 @@ final class SettingsStore: ObservableObject {
         self.inactivityLock = InactivityLockOption(
             rawValue: defaults.integer(forKey: Key.inactivityLock)
         ) ?? .off
+        self.startTouchIDWhenLocked = defaults.bool(forKey: Key.startTouchIDWhenLocked)
         self.preventScreenSaver = defaults.bool(forKey: Key.preventScreenSaver)
         self.preventSleep = defaults.bool(forKey: Key.preventSleep)
         if self.lockShortcut == self.unlockShortcut {

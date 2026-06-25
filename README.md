@@ -165,7 +165,9 @@ Current settings:
 - Lock Shortcut: optional global shortcut that starts input suppression. Frost
   clears it if it matches the unlock shortcut.
 - Auto-lock: optional inactivity timer based on keyboard, mouse, and trackpad
-  idle time.
+  idle time, from 30 seconds up to 2 hours.
+- Start Touch ID automatically when locked: optional; opens the Touch ID prompt
+  as soon as a lock begins instead of waiting for the unlock shortcut.
 - Prevent screen saver: holds a display-sleep prevention assertion while locked.
 - Prevent sleep: holds an idle system-sleep prevention assertion while locked.
 - Launch at login: registers Frost as a main-app login item with `SMAppService`.

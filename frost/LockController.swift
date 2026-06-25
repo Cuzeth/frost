@@ -199,6 +199,14 @@ final class LockController: ObservableObject {
                     preventSleep: settings.preventSleep)
         tapRecoveryNotice = nil
         state = .locked
+
+        // Optionally open Touch ID right away instead of waiting for the unlock
+        // shortcut. The overlay is already presented, so the embedded auth view
+        // picks up the prepared context on the next render. If preparation fails,
+        // armAuthentication leaves us idle with a notice — the shortcut can retry.
+        if settings.startTouchIDWhenLocked {
+            armAuthentication()
+        }
         log.info("Locked")
     }
 
