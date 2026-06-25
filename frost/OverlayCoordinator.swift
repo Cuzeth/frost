@@ -130,37 +130,159 @@ struct LockOverlayView: View {
     private var authenticating: Bool { controller.state == .authenticating }
 
     private var lockedCard: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 44, weight: .semibold))
-            Text("Input Locked")
-                .font(.title2.weight(.semibold))
-            Text(authenticating
-                 ? "Use Touch ID to unlock · press Esc to cancel"
-                 : "Press \(controller.unlockShortcutDisplay) to unlock (Touch ID)")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 16) {
+                authenticationMark
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(authenticating ? "Authenticate" : "Input Locked")
+                        .font(.title2.weight(.semibold))
+                    Text(authenticating
+                         ? "Touch ID or Mac password"
+                         : "Keyboard, mouse, and trackpad input are paused")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                if authenticating {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .padding(24)
+
+            Divider()
+                .padding(.horizontal, 24)
+
+            VStack(spacing: 16) {
+                if authenticating {
+                    authenticatingPrompt
+                } else {
+                    unlockPrompt
+                }
+
+                safetyStrip
+
+                if let notice = controller.tapRecoveryNotice {
+                    warningText(notice)
+                }
+
+                #if DEBUG
+                if let seconds = controller.debugSecondsRemaining {
+                    warningText("DEBUG auto-unlock in \(seconds)s", font: .footnote.monospacedDigit())
+                }
+                #endif
+            }
+            .padding(24)
+        }
+        .frame(width: 430)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.28), radius: 32, y: 18)
+    }
+
+    private var authenticationMark: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(authenticating ? 0.16 : 0.10))
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+            Image(systemName: authenticating ? "touchid" : "lock.fill")
+                .font(.system(size: authenticating ? 36 : 30, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(authenticating ? Color.accentColor : Color.primary)
+        }
+        .frame(width: 72, height: 72)
+    }
+
+    private var unlockPrompt: some View {
+        HStack(spacing: 14) {
+            keycap(controller.unlockShortcutDisplay)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Unlock Shortcut")
+                    .font(.headline)
+                Text("Press to open the macOS authentication prompt")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var authenticatingPrompt: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+                Text("macOS authentication is waiting")
+                    .font(.headline)
+            }
+
+            Text("""
+                Use Touch ID, or enter your Mac password in the system prompt. \
+                Press Esc to cancel and keep input locked.
+                """)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            if authenticating {
-                ProgressView().padding(.top, 4)
-            }
-            if let notice = controller.tapRecoveryNotice {
-                Text(notice)
-                    .font(.footnote)
-                    .foregroundStyle(.yellow)
-                    .multilineTextAlignment(.center)
-            }
-            #if DEBUG
-            if let seconds = controller.debugSecondsRemaining {
-                Text("DEBUG auto-unlock in \(seconds)s")
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(.yellow)
-            }
-            #endif
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(28)
-        .frame(width: 360)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .frame(maxWidth: .infinity)
+        .padding(16)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var safetyStrip: some View {
+        HStack(spacing: 8) {
+            statusPill(icon: "keyboard", text: "Input paused")
+            statusPill(icon: "cursorarrow", text: "Pointer frozen")
+            statusPill(icon: "lock.shield", text: "Local auth")
+        }
+    }
+
+    private func keycap(_ text: String) -> some View {
+        Text(text)
+            .font(.system(.title3, design: .rounded).weight(.semibold))
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 14)
+            .frame(minWidth: 106, minHeight: 44)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.20), lineWidth: 1)
+            }
+    }
+
+    private func statusPill(icon: String, text: String) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption.weight(.medium))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
+            .background(Color.white.opacity(0.07), in: Capsule())
+    }
+
+    private func warningText(_ message: String, font: Font = .footnote) -> some View {
+        Text(message)
+            .font(font)
+            .foregroundStyle(.yellow)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private func recoveryCard(_ message: String) -> some View {

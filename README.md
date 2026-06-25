@@ -365,6 +365,6 @@ repository.
 
 - There is no test target in the current project.
 - Sparkle hardening keys are not set explicitly yet.
-- Embedded overlay-level authentication is not active; Frost currently uses the
-  standard LocalAuthentication prompt because the embedded experiment did not
-  unlock reliably in testing.
+- The overlay now shows an authentication state, but unlock still uses the
+  standard LocalAuthentication prompt so Touch ID and macOS password fallback
+  remain system-owned.
