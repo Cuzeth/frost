@@ -4,7 +4,7 @@ Guardrails for AI agents (and humans) working in this repository. **Read this be
 
 ## What Frost is
 
-Frost is a **macOS menu-bar input locker**. It blocks keyboard, mouse, and trackpad input while keeping the display fully visible, and unlocks via Touch ID. It exists to lock your desk while an unattended-but-visible task runs — an AI agent, a long build, a render.
+Frost is a **macOS menu-bar input locker**. It blocks keyboard, mouse, and trackpad input while keeping the display fully visible, and unlocks via Touch ID or macOS password fallback on Macs with Touch ID. It exists to lock your desk while an unattended-but-visible task runs — an AI agent, a long build, a render.
 
 ## What Frost is NOT — do not change these framings
 
@@ -22,7 +22,7 @@ Input suppression can trap the user with no way to type or click. Every change m
 2. **Debug auto-unlock timer.** In DEBUG builds, a timer tears the lock down after N seconds regardless of auth. It must be present from the very first line of tap code and must never compile into release builds (`#if DEBUG`).
 3. **Visible recovery / warning state.** If the event tap can't be created, the overlay must show a clear, visible "input unavailable / how to recover" recovery state rather than silently trapping input. If the tap gets disabled (`tapDisabledByTimeout` / `tapDisabledByUserInput`) while locked, re-enable it and show a visible warning on the overlay.
 
-Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPresentationOptions.disableForceQuit`): opening it steals focus from the Touch ID prompt and strands the user. The escape hatches above replace it. Order of implementation is fixed: **SIGTERM handler → debug auto-unlock → recovery UI come before any input-suppressing code.**
+Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPresentationOptions.disableForceQuit`): opening it steals focus from the authentication prompt and strands the user. The escape hatches above replace it. Order of implementation is fixed: **SIGTERM handler → debug auto-unlock → recovery UI come before any input-suppressing code.**
 
 ## Architecture / hard constraints
 
@@ -36,7 +36,7 @@ Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPr
 
 - **Input suppression:** `CGEvent.tapCreate` with `.cgSessionEventTap` + `.headInsertEventTap` + `.defaultTap` — an *active* session-level tap; suppress by returning `nil` from the callback. Re-enable on `tapDisabledByTimeout` / `tapDisabledByUserInput` and make that visible in the overlay. Do not switch to `.cghidEventTap` without explicitly accepting a root/privileged architecture.
 - **Overlays:** one borderless `NSWindow` per `NSScreen`, level `.screenSaver`, collection behavior `canJoinAllSpaces` + `fullScreenAuxiliary`. Rebuild on `NSApplication.didChangeScreenParametersNotification`. Respect `safeAreaInsets` for notched displays.
-- **Unlock:** `LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)` with Touch ID required. Preflight Touch ID before suppressing input; if Touch ID is unavailable, show recovery and do not lock. The unlock hotkey is recognized **inside** the event-tap callback (keycodes + modifier flags), because normal key/menu routing is dead while input is suppressed. Pointer events are swallowed while locked; do not add mouse click-through unless the tap/overlay safety story is redesigned.
+- **Unlock:** preflight Touch ID with `LAContext.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)` before suppressing input; if Touch ID is unavailable, show recovery and do not lock. The actual unlock evaluation uses a fresh `LAContext.evaluatePolicy(.deviceOwnerAuthentication)` bound to an embedded `LAAuthenticationView` in the overlay, preserving Touch ID and macOS password fallback. The unlock hotkey is recognized **inside** the event-tap callback (keycodes + modifier flags), because normal key/menu routing is dead while input is suppressed. Pointer events are swallowed while locked; do not add mouse click-through unless the tap/overlay safety story is redesigned.
 - **Sleep:** `IOPMAssertionCreateWithName` with two independent assertions, `kIOPMAssertionTypePreventUserIdleDisplaySleep` and `kIOPMAssertionTypePreventUserIdleSystemSleep`. Acquire on lock, release on unlock/terminate. **Do not** claim lid-closed operation.
 - **Permissions:** Accessibility via `AXIsProcessTrustedWithOptions`. Do not gate Frost on Input Monitoring unless the event-tap architecture changes and testing proves it is required.
 - **Updates:** Sparkle `SPUStandardUpdaterController` with a "Check for Updates…" menu item.

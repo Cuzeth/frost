@@ -1,7 +1,8 @@
 # Frost
 
 Frost is a macOS menu-bar input locker. It suppresses keyboard, mouse, and
-trackpad input while keeping the display visible, then unlocks with Touch ID.
+trackpad input while keeping the display visible, then unlocks with Touch ID or
+macOS password fallback on Macs with Touch ID.
 
 It is built for the awkward but useful moment when you want the Mac to keep
 showing an unattended task, but you do not want local input to interfere with it:
@@ -47,11 +48,12 @@ When you choose **Lock Input**, Frost:
 
 When you press the unlock shortcut, Frost keeps the overlay and event tap active,
 then asks macOS to authenticate with
-`LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)`. Frost uses
-Touch ID only; keyboard password fallback is not a supported unlock path while
-keyboard input is intentionally suppressed. If authentication succeeds, Frost
-tears everything down and restores normal input. If it is cancelled or fails,
-Frost returns to the locked state.
+`LAContext.evaluatePolicy(.deviceOwnerAuthentication)`. Frost binds that context
+to an embedded `LAAuthenticationView` inside the overlay, so the authentication
+affordance stays visible at Frost's overlay level while preserving Touch ID and
+password fallback. If authentication succeeds, Frost tears everything down and
+restores normal input. If it is cancelled or fails, Frost returns to the locked
+state.
 
 The default unlock shortcut is `Control-Option-Command-U`.
 
@@ -79,8 +81,8 @@ they are part of the project contract.
 
 ### Normal Unlock
 
-Press the configured unlock shortcut, then authenticate with the macOS Touch ID
-prompt.
+Press the configured unlock shortcut, then authenticate with Touch ID or the
+macOS password fallback.
 
 The unlock shortcut is recognized inside the event-tap callback, because normal
 menu and keyboard routing is unavailable while input is suppressed.
@@ -130,7 +132,7 @@ cannot be created at all, Frost does not lock input.
 ### Force Quit
 
 Frost disables the Force Quit panel while locked. This is intentional: opening
-Force Quit while the Touch ID prompt is active can steal focus from the auth
+Force Quit while the authentication prompt is active can steal focus from the auth
 prompt and strand the user. Use the unlock shortcut, the debug auto-unlock in
 debug builds, or the `SIGTERM` path above.
 
@@ -241,11 +243,14 @@ Those options are always cleared during teardown.
 `UnlockCoordinator` wraps LocalAuthentication:
 
 ```swift
-LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)
+LAContext.evaluatePolicy(.deviceOwnerAuthentication)
 ```
 
-This asks macOS for biometric authentication and Frost requires the biometric
-type to be Touch ID before it starts suppressing input.
+Before locking, Frost verifies that the Mac reports Touch ID through
+`.deviceOwnerAuthenticationWithBiometrics`. During unlock, the prepared
+`LAContext` is bound to an embedded `LAAuthenticationView` in the overlay, then
+evaluated with `.deviceOwnerAuthentication` so Touch ID and password fallback
+remain system-owned.
 
 ### Power Assertions
 

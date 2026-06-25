@@ -2,9 +2,9 @@
 //  UnlockCoordinator.swift
 //  frost
 //
-//  Wraps LocalAuthentication. Frost requires Touch ID because the event tap
-//  suppresses keyboard input while locked; password fallback is not a viable
-//  unlock path without changing the tap/overlay safety model.
+//  Wraps LocalAuthentication. Frost requires a Mac with Touch ID, then evaluates
+//  .deviceOwnerAuthentication so the system can offer password fallback without
+//  changing Frost's event-tap lifecycle.
 //
 
 import Foundation
@@ -16,6 +16,7 @@ enum TouchIDCheck: Equatable {
 }
 
 enum AuthenticationResult: Equatable {
+    case prepared
     case success
     case cancelled
     case failed
@@ -25,42 +26,64 @@ enum AuthenticationResult: Equatable {
 @MainActor
 final class UnlockCoordinator {
     private var context: LAContext?
-    private let policy: LAPolicy = .deviceOwnerAuthenticationWithBiometrics
+    private let touchIDPolicy: LAPolicy = .deviceOwnerAuthenticationWithBiometrics
+    private let unlockPolicy: LAPolicy = .deviceOwnerAuthentication
 
-    /// Frost is Touch ID-only. Check before suppressing input so machines
+    var currentContext: LAContext? { context }
+
+    /// Frost is Touch ID-gated. Check before suppressing input so machines
     /// without a usable Touch ID path never enter a lock.
     func checkTouchIDAvailability() -> TouchIDCheck {
         let context = LAContext()
-        context.localizedFallbackTitle = ""
         var error: NSError?
-        guard context.canEvaluatePolicy(policy, error: &error) else {
+        let canEvaluateTouchID = context.canEvaluatePolicy(touchIDPolicy, error: &error)
+        guard context.biometryType == .touchID else {
             return .unavailable(Self.touchIDUnavailableMessage(error, whileLocked: false))
         }
-        guard context.biometryType == .touchID else {
-            return .unavailable("""
-                Frost requires Touch ID. This Mac does not report a Touch ID \
-                sensor, so input was not locked.
-                """)
+
+        if canEvaluateTouchID {
+            return .available
         }
-        return .available
+
+        if Self.isPasswordFallbackAvailable(for: error) {
+            return .available
+        }
+
+        return .unavailable(Self.touchIDUnavailableMessage(error, whileLocked: false))
     }
 
-    /// Presents Touch ID and resolves to the outcome. Password fallback is not
-    /// requested because local keyboard input remains suppressed while locked.
-    func authenticate(reason: String) async -> AuthenticationResult {
+    /// Creates the context that the overlay binds to LAAuthenticationView.
+    /// Evaluation starts only after the embedded view reports that it exists.
+    func prepareAuthenticationContext() -> AuthenticationResult {
         let context = LAContext()
-        context.localizedFallbackTitle = ""
+        context.localizedFallbackTitle = "Enter Password"
         var error: NSError?
-        guard context.canEvaluatePolicy(policy, error: &error),
-              context.biometryType == .touchID
-        else {
+
+        let canEvaluateTouchID = context.canEvaluatePolicy(touchIDPolicy, error: &error)
+        guard context.biometryType == .touchID else {
             return .unavailable(Self.touchIDUnavailableMessage(error, whileLocked: true))
         }
 
+        guard canEvaluateTouchID || Self.isPasswordFallbackAvailable(for: error) else {
+            return .unavailable(Self.touchIDUnavailableMessage(error, whileLocked: true))
+        }
+
+        guard context.canEvaluatePolicy(unlockPolicy, error: &error) else {
+            return .unavailable(Self.unlockUnavailableMessage(error))
+        }
+
         self.context = context
+        return .prepared
+    }
+
+    /// Runs auth on the prepared, overlay-bound context.
+    func authenticatePreparedContext(reason: String) async -> AuthenticationResult {
+        guard let context else {
+            return .unavailable(Self.unlockUnavailableMessage(nil))
+        }
 
         let result: AuthenticationResult = await withCheckedContinuation { continuation in
-            context.evaluatePolicy(policy,
+            context.evaluatePolicy(unlockPolicy,
                                    localizedReason: reason) { success, error in
                 continuation.resume(returning: Self.authenticationResult(success: success, error: error))
             }
@@ -101,6 +124,42 @@ final class UnlockCoordinator {
             return .unavailable(touchIDUnavailableMessage(nsError, whileLocked: true))
         default:
             return .failed
+        }
+    }
+
+    nonisolated private static func isPasswordFallbackAvailable(for error: NSError?) -> Bool {
+        guard let error,
+              error.domain == LAError.errorDomain,
+              let code = LAError.Code(rawValue: error.code)
+        else {
+            return false
+        }
+        return code == .biometryLockout
+    }
+
+    nonisolated private static func unlockUnavailableMessage(_ error: NSError?) -> String {
+        guard let error,
+              error.domain == LAError.errorDomain,
+              let code = LAError.Code(rawValue: error.code)
+        else {
+            return """
+                Frost could not start macOS authentication. Press the unlock \
+                shortcut to try again, or use `pkill -x frost` from Remote Login.
+                """
+        }
+
+        switch code {
+        case .passcodeNotSet:
+            return """
+                macOS password fallback is unavailable because this account has \
+                no login password. Use `pkill -x frost` from Remote Login or a \
+                terminal opened before locking.
+                """
+        default:
+            return """
+                macOS authentication is unavailable right now. Press the unlock \
+                shortcut to try again, or use `pkill -x frost` from Remote Login.
+                """
         }
     }
 

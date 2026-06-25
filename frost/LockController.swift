@@ -7,7 +7,7 @@
 //  the state machine + the DEBUG auto-unlock safety net.
 //
 //  SAFETY: independent ways out of a lock:
-//    1. The unlock chord (⌃⌥⌘U) → Touch ID.
+//    1. The unlock chord (⌃⌥⌘U) → Touch ID / password fallback.
 //    2. The DEBUG auto-unlock timer (debug builds only).
 //    3. Sending SIGTERM (e.g. `pkill -x frost` / `kill` over SSH) — caught
 //       below and torn down cleanly, independent of app state.
@@ -16,6 +16,7 @@
 import AppKit
 import Combine
 import Foundation
+import LocalAuthentication
 import os
 
 enum LockState: Equatable {
@@ -68,6 +69,7 @@ final class LockController: ObservableObject {
 
     /// The configured unlock shortcut, formatted for the overlay hint.
     var unlockShortcutDisplay: String { settings.unlockShortcut.displayString }
+    var authenticationContext: LAContext? { unlocker.currentContext }
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -231,21 +233,41 @@ final class LockController: ObservableObject {
         guard state == .locked else { return }
         authenticationTask?.cancel()
         authenticationTask = nil
+
+        switch unlocker.prepareAuthenticationContext() {
+        case .prepared:
+            break
+        case .unavailable(let message):
+            reLock(notice: message)
+            return
+        case .success, .cancelled, .failed:
+            reLock()
+            return
+        }
+
         state = .authenticating
 
-        // Keep the screen covered and input frozen while the Touch ID prompt is
-        // up — only Esc is allowed through, so the prompt can be cancelled. The
-        // machine is NEVER exposed merely because authentication started; the
-        // Touch ID sensor is hardware and works behind the overlay.
+        // Keep the screen covered and input frozen while the embedded
+        // LocalAuthentication view is up. Esc is allowed through so the user can
+        // cancel the prompt and remain locked.
         tap.setAuthenticating(true)
+    }
+
+    func authenticationViewReady(for context: LAContext) {
+        guard state == .authenticating,
+              authenticationTask == nil,
+              unlocker.currentContext === context
+        else { return }
 
         authenticationTask = Task { [weak self] in
             guard let self else { return }
-            let result = await self.unlocker.authenticate(reason: "Unlock Frost")
+            let result = await self.unlocker.authenticatePreparedContext(reason: "Unlock Frost")
             if Task.isCancelled { return }
             self.authenticationTask = nil
             guard self.state == .authenticating else { return } // safety net won the race
             switch result {
+            case .prepared:
+                self.reLock()
             case .success:
                 self.finishUnlock()
             case .unavailable(let message):

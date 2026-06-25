@@ -12,6 +12,8 @@
 //
 
 import AppKit
+import LocalAuthentication
+import LocalAuthenticationEmbeddedUI
 import SwiftUI
 
 @MainActor
@@ -66,12 +68,20 @@ final class OverlayCoordinator: NSObject {
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
         guard let controller else { return }
-        for screen in NSScreen.screens {
-            windows.append(makeWindow(for: screen, controller: controller))
+        for (index, screen) in NSScreen.screens.enumerated() {
+            windows.append(makeWindow(
+                for: screen,
+                controller: controller,
+                showsEmbeddedAuthentication: index == 0
+            ))
         }
     }
 
-    private func makeWindow(for screen: NSScreen, controller: LockController) -> NSWindow {
+    private func makeWindow(
+        for screen: NSScreen,
+        controller: LockController,
+        showsEmbeddedAuthentication: Bool
+    ) -> NSWindow {
         let window = OverlayWindow(contentRect: screen.frame,
                                    styleMask: .borderless,
                                    backing: .buffered,
@@ -85,6 +95,7 @@ final class OverlayCoordinator: NSObject {
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: LockOverlayView(
             controller: controller,
+            showsEmbeddedAuthentication: showsEmbeddedAuthentication,
             safeAreaInsets: screen.safeAreaInsets.swiftUIInsets
         ))
         window.setFrame(screen.frame, display: true)
@@ -107,6 +118,7 @@ private extension NSEdgeInsets {
 
 struct LockOverlayView: View {
     @ObservedObject var controller: LockController
+    var showsEmbeddedAuthentication: Bool
     var safeAreaInsets: EdgeInsets
 
     var body: some View {
@@ -139,7 +151,7 @@ struct LockOverlayView: View {
                     Text(authenticating ? "Authenticate" : "Input Locked")
                         .font(.title2.weight(.semibold))
                     Text(authenticating
-                         ? "Touch ID required"
+                         ? "Touch ID or password"
                          : "Keyboard, mouse, and trackpad input are paused")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -209,7 +221,7 @@ struct LockOverlayView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Unlock Shortcut")
                     .font(.headline)
-                Text("Press to open the macOS authentication prompt")
+                Text("Press to open the in-overlay authentication prompt")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -223,15 +235,21 @@ struct LockOverlayView: View {
 
     private var authenticatingPrompt: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 10) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.title3)
+            if showsEmbeddedAuthentication, let context = controller.authenticationContext {
+                EmbeddedAuthenticationView(
+                    authenticationContext: context,
+                    onReady: controller.authenticationViewReady
+                )
+                .id(ObjectIdentifier(context))
+                .frame(width: 96, height: 76)
+            } else {
+                Image(systemName: "touchid")
+                    .font(.system(size: 44, weight: .semibold))
+                    .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(Color.accentColor)
-                Text("macOS authentication is waiting")
-                    .font(.headline)
             }
 
-            Text("Use Touch ID to unlock. Press Esc to cancel and keep input locked.")
+            Text("Use Touch ID or the password fallback. Press Esc to cancel and keep input locked.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -246,7 +264,7 @@ struct LockOverlayView: View {
         HStack(spacing: 8) {
             statusPill(icon: "keyboard", text: "Input paused")
             statusPill(icon: "cursorarrow", text: "Pointer frozen")
-            statusPill(icon: "touchid", text: "Touch ID")
+            statusPill(icon: "touchid", text: "Local auth")
         }
     }
 
@@ -310,4 +328,24 @@ struct LockOverlayView: View {
         .frame(width: 440)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
     }
+}
+
+private struct EmbeddedAuthenticationView: NSViewRepresentable {
+    let authenticationContext: LAContext
+    let onReady: (LAContext) -> Void
+
+    func makeNSView(context: Context) -> LAAuthenticationView {
+        let view = LAAuthenticationView(
+            context: authenticationContext,
+            controlSize: .large
+        )
+        view.setContentHuggingPriority(.required, for: .horizontal)
+        view.setContentHuggingPriority(.required, for: .vertical)
+        DispatchQueue.main.async {
+            onReady(authenticationContext)
+        }
+        return view
+    }
+
+    func updateNSView(_ view: LAAuthenticationView, context: Context) {}
 }
