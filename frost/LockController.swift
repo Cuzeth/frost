@@ -56,6 +56,9 @@ final class LockController: ObservableObject {
     private var signalSources: [any DispatchSourceSignal] = []
     /// Global key monitor for the optional lock hotkey (active while unlocked).
     private var lockHotKeyMonitor: Any?
+    /// Observer for Accessibility-trust changes, so the hotkey monitor can be
+    /// re-armed once trust is granted (see `installLockHotKeyMonitor`).
+    private var accessibilityObserver: (any NSObjectProtocol)?
     private var authenticationTask: Task<Void, Never>?
 
     #if DEBUG
@@ -91,6 +94,9 @@ final class LockController: ObservableObject {
     deinit {
         MainActor.assumeIsolated {
             removeLockHotKeyMonitor()
+            if let accessibilityObserver {
+                DistributedNotificationCenter.default().removeObserver(accessibilityObserver)
+            }
             inactivity.stop()
             stopDebugAutoUnlock()
             sleep.releaseAll()
@@ -107,7 +113,29 @@ final class LockController: ObservableObject {
     /// Optional system-wide hotkey that STARTS a lock. A non-consuming global
     /// monitor is enough: it only needs to trigger a lock, and it never fires
     /// while Frost itself is frontmost (so it won't clash with the recorder).
+    ///
+    /// `NSEvent` global *keyboard* monitors only deliver events while the
+    /// process is trusted for Accessibility, and a monitor installed before
+    /// trust is granted stays dead even once it is — it has to be re-added.
+    /// Frost requests Accessibility lazily (at the first lock), so we re-arm the
+    /// monitor whenever AX trust changes; otherwise the hotkey silently does
+    /// nothing until the next launch.
     private func installLockHotKeyMonitor() {
+        accessibilityObserver = DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.accessibility.api"),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.armLockHotKeyMonitor() }
+        }
+        armLockHotKeyMonitor()
+    }
+
+    /// Tear down any existing monitor and install a fresh one so it picks up
+    /// the current Accessibility-trust state. Safe to call repeatedly.
+    private func armLockHotKeyMonitor() {
+        removeLockHotKeyMonitor()
         lockHotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             // Pull the Sendable bits out here; hop to the main actor to act.
             let keyCode = event.keyCode
