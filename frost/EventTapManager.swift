@@ -1,0 +1,202 @@
+//
+//  EventTapManager.swift
+//  frost
+//
+//  Owns the CGEvent tap that suppresses keyboard + pointer input. The tap is
+//  ACTIVE (.defaultTap): the callback returns nil to swallow every event. The
+//  unlock chord is recognized HERE, inside the callback, because normal key
+//  routing is dead while input is suppressed.
+//
+//  During authentication the tap stays active and the cursor stays frozen — the
+//  screen is never exposed — but the Esc key is allowed through so the user can
+//  cancel the system Touch ID / password prompt and stay locked.
+//
+//  Placement: we prefer .cghidEventTap (intercepts events BEFORE the system
+//  acts on symbolic hotkeys like Spotlight / Mission Control) and fall back to
+//  .cgSessionEventTap if HID isn't permitted in this context.
+//
+//  The tap source is added to the MAIN run loop, so the C callback runs on the
+//  main thread; we assert main-actor isolation to call back into this class.
+//
+
+import CoreGraphics
+import Foundation
+import os
+
+// kVK_ANSI_U (Carbon HIToolbox). Unlock chord is Control–Option–Command–U.
+private let kUnlockKeyCode: Int64 = 0x20
+// kVK_Escape — passed through during auth so the user can cancel the prompt.
+private let kEscapeKeyCode: Int64 = 0x35
+
+@MainActor
+final class EventTapManager {
+    /// Invoked on the main actor when the unlock chord is pressed.
+    var onUnlockChord: (() -> Void)?
+
+    private var tap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    /// Our INTENT to suppress. Distinguishes "user disabled the tap for auth"
+    /// from "the system disabled the tap" so we never re-enable against intent.
+    private var shouldSuppress = false
+    /// While authenticating, the Esc key is the ONE event we let through (so the
+    /// system Touch ID / password prompt can be cancelled). Everything else stays
+    /// suppressed and the cursor stays frozen — the screen is never exposed.
+    private var passEscapeToSystem = false
+    private let log = Logger(subsystem: "dev.abdeen.frost", category: "EventTap")
+
+    private(set) var isRunning = false
+
+    /// Creates and enables the tap. Returns `false` if creation fails at every
+    /// placement — almost always missing Accessibility / Input Monitoring. The
+    /// caller MUST then surface the recovery state; input is NOT suppressed.
+    func start() -> Bool {
+        guard tap == nil else { return true }
+
+        let mask: CGEventMask = (
+            (1 << CGEventType.keyDown.rawValue) |
+            (1 << CGEventType.keyUp.rawValue) |
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.leftMouseDown.rawValue) |
+            (1 << CGEventType.leftMouseUp.rawValue) |
+            (1 << CGEventType.rightMouseDown.rawValue) |
+            (1 << CGEventType.rightMouseUp.rawValue) |
+            (1 << CGEventType.otherMouseDown.rawValue) |
+            (1 << CGEventType.otherMouseUp.rawValue) |
+            (1 << CGEventType.mouseMoved.rawValue) |
+            (1 << CGEventType.leftMouseDragged.rawValue) |
+            (1 << CGEventType.rightMouseDragged.rawValue) |
+            (1 << CGEventType.otherMouseDragged.rawValue) |
+            (1 << CGEventType.scrollWheel.rawValue)
+        )
+
+        var created: CFMachPort?
+        var usedLocation: CGEventTapLocation = .cgSessionEventTap
+        for location in [CGEventTapLocation.cghidEventTap, .cgSessionEventTap] {
+            if let port = CGEvent.tapCreate(
+                tap: location,
+                place: .headInsertEventTap,
+                options: .defaultTap,
+                eventsOfInterest: mask,
+                callback: frostEventTapCallback,
+                userInfo: Unmanaged.passUnretained(self).toOpaque()
+            ) {
+                created = port
+                usedLocation = location
+                break
+            }
+        }
+
+        guard let port = created else {
+            log.error("CGEvent.tapCreate failed at all placements (missing permission?)")
+            return false
+        }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: port, enable: true)
+
+        tap = port
+        runLoopSource = source
+        shouldSuppress = true
+        isRunning = true
+        setCursorFrozen(true)
+
+        let levelName = usedLocation == .cghidEventTap ? "HID" : "session"
+        log.info("Event tap started at \(levelName, privacy: .public) level")
+        return true
+    }
+
+    /// Enter/leave authentication mode WITHOUT changing suppression: the tap
+    /// stays active, input stays swallowed, and the cursor stays frozen, so the
+    /// screen is never exposed while the Touch ID / password prompt is up. The
+    /// only difference is that Esc is allowed through, letting the user cancel
+    /// the prompt and remain locked. Leaving auth mode re-freezes Esc.
+    func setAuthenticating(_ on: Bool) {
+        passEscapeToSystem = on
+    }
+
+    /// Fully tears the tap down; input + cursor return to normal.
+    func stop() {
+        shouldSuppress = false
+        passEscapeToSystem = false
+        if let tap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+        if let tap { CFMachPortInvalidate(tap) }
+        runLoopSource = nil
+        tap = nil
+        isRunning = false
+        setCursorFrozen(false)   // ALWAYS restore the cursor
+        log.info("Event tap stopped")
+    }
+
+    // Freeze/unfreeze the on-screen cursor. Swallowing mouseMoved stops apps
+    // from seeing movement, but the WindowServer still moves the cursor sprite;
+    // decoupling the device from the cursor is what actually freezes it.
+    private func setCursorFrozen(_ frozen: Bool) {
+        _ = CGAssociateMouseAndMouseCursorPosition(frozen ? 0 : 1)
+    }
+
+    // MARK: - Callback handling (main actor)
+
+    /// Returns `true` if the event should be swallowed.
+    fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            // Re-enable ONLY if we still intend to suppress. Never fight an
+            // intentional disable (e.g. while authenticating).
+            if shouldSuppress, let tap {
+                CGEvent.tapEnable(tap: tap, enable: true)
+                log.error("Tap disabled by system; re-enabled")
+            }
+            return false
+        case .keyDown:
+            // While authenticating, Esc must reach the system prompt so the user
+            // can cancel and stay locked. Everything else stays suppressed.
+            if passEscapeToSystem, isEscape(event) { return false }
+            if isUnlockChord(event) { onUnlockChord?() }
+            return true
+        case .keyUp:
+            if passEscapeToSystem, isEscape(event) { return false }
+            return true
+        default:
+            return true
+        }
+    }
+
+    private func isEscape(_ event: CGEvent) -> Bool {
+        guard event.getIntegerValueField(.keyboardEventKeycode) == kEscapeKeyCode else {
+            return false
+        }
+        // Only BARE Esc cancels the prompt. A modified combo (e.g. ⌘⌥Esc, the
+        // Force Quit chord) must stay swallowed — it should never reach the
+        // system while we're locked.
+        let flags = event.flags
+        return !flags.contains(.maskCommand)
+            && !flags.contains(.maskAlternate)
+            && !flags.contains(.maskControl)
+    }
+
+    private func isUnlockChord(_ event: CGEvent) -> Bool {
+        guard event.getIntegerValueField(.keyboardEventKeycode) == kUnlockKeyCode else {
+            return false
+        }
+        let flags = event.flags
+        return flags.contains(.maskControl)
+            && flags.contains(.maskAlternate)
+            && flags.contains(.maskCommand)
+    }
+}
+
+// C-compatible trampoline. The `CGEventTapCallBack` type is `@convention(c)`,
+// so this closure is non-capturing and nonisolated; we hop to the main actor
+// (we are already on its run loop) to touch EventTapManager.
+private let frostEventTapCallback: CGEventTapCallBack = { _, type, event, refcon in
+    guard let refcon else { return Unmanaged.passUnretained(event) }
+    let manager = Unmanaged<EventTapManager>.fromOpaque(refcon).takeUnretainedValue()
+    let swallow = MainActor.assumeIsolated {
+        manager.handle(type: type, event: event)
+    }
+    return swallow ? nil : Unmanaged.passUnretained(event)
+}

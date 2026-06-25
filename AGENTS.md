@@ -18,11 +18,11 @@ Describe it as an *input suppressor + overlay manager + local auth gate*. Never 
 
 Input suppression can trap the user with no way to type or click. Every change must preserve **all** of these escape hatches. If a change would weaken any of them, stop and flag it.
 
-1. **Killswitch first.** `scripts/killswitch.sh` force-quits Frost by executable name / bundle id (`dev.abdeen.frost`) and must keep working independent of app state. Because a session event tap blocks *local* input, the realistic way to run it is **over SSH from another device**, or from a terminal you opened before locking — document it that way.
+1. **Remote kill (SIGTERM).** Frost catches `SIGTERM` and tears the lock down cleanly (restores the cursor, releases the tap) before exiting, independent of app state. Because the event tap blocks *local* input, the realistic way to trigger it is **over SSH from another device** (`pkill -x frost` / `kill <pid>`), or from a terminal you opened before locking — document it that way. (There is intentionally no in-repo killswitch script; the SIGTERM handler is the contract.)
 2. **Debug auto-unlock timer.** In DEBUG builds, a timer tears the lock down after N seconds regardless of auth. It must be present from the very first line of tap code and must never compile into release builds (`#if DEBUG`).
 3. **Visible recovery state.** If the event tap can't be created, or gets disabled (`tapDisabledByTimeout` / `tapDisabledByUserInput`), the overlay must show a clear, visible "input unavailable / how to recover" state rather than silently trapping input.
 
-Order of implementation is fixed: **killswitch → debug auto-unlock → recovery UI come before any input-suppressing code.**
+Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPresentationOptions.disableForceQuit`): opening it steals focus from the Touch ID prompt and strands the user. The escape hatches above replace it. Order of implementation is fixed: **SIGTERM handler → debug auto-unlock → recovery UI come before any input-suppressing code.**
 
 ## Architecture / hard constraints
 
