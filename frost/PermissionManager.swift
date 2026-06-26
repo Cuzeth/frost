@@ -26,8 +26,4 @@ final class PermissionManager {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         return AXIsProcessTrustedWithOptions([key: prompt] as CFDictionary)
     }
-
-    var allGranted: Bool {
-        hasAccessibility()
-    }
 }

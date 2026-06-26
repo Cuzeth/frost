@@ -343,6 +343,7 @@ struct LockOverlayView: View {
             HStack(spacing: 12) {
                 if recovery.showsAccessibilitySettings {
                     Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+                    Button("Quit Frost") { controller.quitFrost() }
                 }
                 if recovery.allowsRetry {
                     Button("Try Again") { controller.retryRecovery() }

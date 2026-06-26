@@ -49,6 +49,8 @@ final class LockController: ObservableObject {
     private let inactivity = InactivityLockMonitor()
     private let settings: SettingsStore
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Lock")
+    private var accessibilityTrustedAtLaunch = false
+    private var accessibilityRequiresRelaunch = false
 
     /// Weak global handle so the SIGTERM dispatch source can reach the live
     /// controller without capturing it in a @Sendable closure.
@@ -57,9 +59,8 @@ final class LockController: ObservableObject {
     /// Global key monitor for the optional lock hotkey (active while unlocked).
     private var lockHotKeyMonitor: Any?
     /// Observer for Accessibility-trust changes, so the optional lock hotkey
-    /// monitor can be re-armed once trust is granted.
+    /// monitor can be removed if trust disappears while Frost is running.
     private var accessibilityObserver: (any NSObjectProtocol)?
-    private var accessibilityRetryTask: Task<Void, Never>?
     private var authenticationTask: Task<Void, Never>?
 
     #if DEBUG
@@ -77,6 +78,7 @@ final class LockController: ObservableObject {
 
     init(settings: SettingsStore) {
         self.settings = settings
+        accessibilityTrustedAtLaunch = permissions.hasAccessibility()
         Self.shared = self
         tap.unlockShortcut = settings.unlockShortcut
         // Defer to the next main-loop tick so we never mutate the tap from
@@ -98,7 +100,6 @@ final class LockController: ObservableObject {
             if let accessibilityObserver {
                 DistributedNotificationCenter.default().removeObserver(accessibilityObserver)
             }
-            accessibilityRetryTask?.cancel()
             inactivity.stop()
             stopDebugAutoUnlock()
             sleep.releaseAll()
@@ -118,7 +119,8 @@ final class LockController: ObservableObject {
     ///
     /// `NSEvent` global *keyboard* monitors only deliver events while the
     /// process is trusted for Accessibility. Frost requests Accessibility
-    /// lazily, so don't install the monitor until trust is already present.
+    /// lazily, so don't install the monitor unless trust was already active when
+    /// this process launched.
     private func installLockHotKeyMonitor() {
         accessibilityObserver = DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name("com.apple.accessibility.api"),
@@ -131,11 +133,19 @@ final class LockController: ObservableObject {
         refreshLockHotKeyMonitor()
     }
 
-    /// Install only when Accessibility is granted. If trust is removed while the
-    /// app is running, tear the stale monitor down and let the menu item remain
-    /// the visible way to request permission again.
+    /// Install only when Accessibility was active at launch and remains active
+    /// now. A new grant needs a Frost relaunch before the lock hotkey or event
+    /// tap are considered usable.
     private func refreshLockHotKeyMonitor(reinstall: Bool = false) {
-        guard permissions.hasAccessibility() else {
+        let currentlyTrusted = permissions.hasAccessibility()
+        if !currentlyTrusted {
+            accessibilityRequiresRelaunch = true
+        }
+
+        guard accessibilityTrustedAtLaunch,
+              !accessibilityRequiresRelaunch,
+              currentlyTrusted
+        else {
             removeLockHotKeyMonitor()
             return
         }
@@ -152,6 +162,12 @@ final class LockController: ObservableObject {
             let modifiers = event.modifierFlags
             Task { @MainActor in self?.handleLockHotKey(keyCode: keyCode, modifiers: modifiers) }
         }
+    }
+
+    private func hasUsableAccessibility() -> Bool {
+        accessibilityTrustedAtLaunch
+            && !accessibilityRequiresRelaunch
+            && permissions.hasAccessibility()
     }
 
     private func removeLockHotKeyMonitor() {
@@ -201,21 +217,25 @@ final class LockController: ObservableObject {
             return
         }
 
-        // Without Accessibility the tap can't suppress input. Show the recovery
-        // state — never a lock the user can't escape. The grant can arrive
-        // asynchronously after the user opens System Settings, so keep watching
-        // and retry this lock attempt when macOS flips trust on.
-        guard permissions.allGranted else {
+        // Without Accessibility the tap can't suppress input. Prompt, then show
+        // the recovery state — never a lock the user can't escape. A fresh grant
+        // often is not usable by the current process, so the user must relaunch
+        // Frost before locking.
+        guard hasUsableAccessibility() else {
+            if !permissions.hasAccessibility() {
+                permissions.requestAccessibility()
+            }
+            accessibilityRequiresRelaunch = true
             enterRecovery(RecoveryState(
                 message: """
                 Frost needs Accessibility. Enable it for \
-                Frost in System Settings → Privacy & Security. Frost will retry \
-                automatically when access is granted. \
+                Frost in System Settings → Privacy & Security, then quit and \
+                reopen Frost before locking. \
                 Input is NOT locked.
                 """,
-                showsAccessibilitySettings: true
+                showsAccessibilitySettings: true,
+                allowsRetry: false
             ))
-            startAccessibilityGrantWatcher()
             return
         }
         refreshLockHotKeyMonitor()
@@ -382,48 +402,21 @@ final class LockController: ObservableObject {
 
     func openAccessibilitySettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            dismissRecoveryOverlayForPendingAccessibilityGrant()
-            if !permissions.requestAccessibility() {
-                NSWorkspace.shared.open(url)
-            }
+            dismissRecovery()
+            NSWorkspace.shared.open(url)
         }
     }
 
-    private func startAccessibilityGrantWatcher() {
-        accessibilityRetryTask?.cancel()
-        accessibilityRetryTask = Task { [weak self] in
-            guard let self else { return }
-
-            for _ in 0..<120 {
-                try? await Task.sleep(for: .milliseconds(500))
-                if Task.isCancelled { return }
-                guard self.permissions.hasAccessibility() else { continue }
-
-                self.accessibilityRetryTask = nil
-                self.refreshLockHotKeyMonitor(reinstall: true)
-                self.dismissRecoveryOverlayForPendingAccessibilityGrant()
-                guard self.state == .unlocked else { return }
-                self.lock()
-                return
-            }
-
-            self.accessibilityRetryTask = nil
+    func quitFrost() {
+        if case .recovery = state {
+            teardown()
         }
-    }
-
-    private func dismissRecoveryOverlayForPendingAccessibilityGrant() {
-        guard case .recovery = state else { return }
-        overlay.dismiss()
-        tapRecoveryNotice = nil
-        unlocker.cancel()
-        state = .unlocked
+        NSApp.terminate(nil)
     }
 
     // MARK: - Teardown
 
     private func teardown() {
-        accessibilityRetryTask?.cancel()
-        accessibilityRetryTask = nil
         stopDebugAutoUnlock()
         exitKioskMode()
         sleep.releaseAll()

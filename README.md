@@ -124,9 +124,10 @@ This is compiled only in `DEBUG` builds and must never ship in release builds.
 
 If Frost cannot acquire the required permissions, cannot verify Touch ID, or
 cannot create an event tap, it does not lock input. Instead, it shows an
-**Input Not Locked** recovery overlay with guidance and a retry button. When
-Accessibility is the issue, the overlay also includes a button to open Privacy
-settings.
+**Input Not Locked** recovery overlay with guidance and, where retrying in place
+is useful, a retry button. When Accessibility is the issue, the overlay also
+includes a button to open Privacy settings and a quit button, because macOS may
+not make a fresh Accessibility grant usable until Frost is relaunched.
 
 If macOS disables the event tap while Frost is already locked, Frost attempts to
 re-enable it immediately and shows a visible warning on the overlay. If the tap
@@ -152,7 +153,8 @@ System Settings > Privacy & Security
 ```
 
 If Accessibility is missing, Frost prompts where macOS allows it, then shows the
-recovery overlay instead of suppressing input.
+recovery overlay instead of suppressing input. After granting Accessibility,
+quit and reopen Frost before trying to lock input.
 
 ## Settings
 
@@ -323,7 +325,7 @@ data types, and UserDefaults access for Frost's own settings.
 2. Select the `frost` target/scheme.
 3. Build and run.
 4. Grant Accessibility when prompted.
-5. If macOS does not activate the new permissions immediately, relaunch Frost.
+5. Quit and relaunch Frost so the Accessibility grant is active in the app process.
 
 Important project settings:
 
