@@ -60,6 +60,20 @@ final class OverlayCoordinator: NSObject {
         windows[keyIndex].makeKeyAndOrderFront(nil)
     }
 
+    /// Bring Frost forward and re-key the active-display window that hosts the
+    /// embedded Touch ID prompt. The embedded `LAAuthenticationView` only arms
+    /// the sensor when its window is key; on a fresh launch Frost isn't active
+    /// yet when the overlay is first presented, so the lock-time
+    /// `makeKeyAndOrderFront` doesn't stick. Called when authentication is armed
+    /// so the very first prompt evaluates against a key window — otherwise the
+    /// first attempt no-opped and the user had to Esc-cancel and retry.
+    func focusAuthenticationWindow() {
+        guard !windows.isEmpty else { return }
+        let keyIndex = min(max(authenticationWindowIndex, 0), windows.count - 1)
+        NSApp.activate(ignoringOtherApps: true)
+        windows[keyIndex].makeKeyAndOrderFront(nil)
+    }
+
     func dismiss() {
         NotificationCenter.default.removeObserver(
             self, name: NSApplication.didChangeScreenParametersNotification, object: nil)

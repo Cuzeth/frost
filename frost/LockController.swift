@@ -332,6 +332,12 @@ final class LockController: ObservableObject {
 
         state = .authenticating
 
+        // The embedded Touch ID prompt only arms when its window is key. Make
+        // Frost active and re-key the auth window now, before the embedded view
+        // evaluates, so the first attempt after launch works without an
+        // Esc-cancel and retry.
+        overlay.focusAuthenticationWindow()
+
         // Keep the screen covered and input frozen while the embedded
         // LocalAuthentication view is up. Esc is allowed through so the user can
         // cancel the prompt and remain locked.
