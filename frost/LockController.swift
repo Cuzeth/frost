@@ -71,6 +71,9 @@ final class LockController: ObservableObject {
     #endif
 
     var isLocked: Bool { state != .unlocked }
+    /// True while a Touch ID evaluation is live. The overlay reads this to avoid
+    /// rebuilding (and thereby deallocating the embedded auth view) mid-prompt.
+    var isAuthenticating: Bool { state == .authenticating }
 
     /// The configured unlock shortcut, formatted for the overlay hint.
     var unlockShortcutDisplay: String { settings.unlockShortcut.displayString }
@@ -382,6 +385,10 @@ final class LockController: ObservableObject {
             tapRecoveryNotice = notice
         }
         state = .locked
+        // A screen-parameters change may have been deferred while we were
+        // authenticating; apply it now that destroying the embedded auth view is
+        // safe, so the overlay reflects any real display change.
+        overlay.rebuildIfDeferred()
         log.info("Re-locked after failed/cancelled auth")
     }
 

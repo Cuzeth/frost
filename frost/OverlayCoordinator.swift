@@ -31,6 +31,18 @@ final class OverlayCoordinator: NSObject {
     /// user is. Recomputed on every rebuild.
     private var authenticationWindowIndex = 0
     private weak var controller: LockController?
+    /// Set when a screen-parameters change arrives mid-authentication. Rebuilding
+    /// then would deallocate the embedded `LAAuthenticationView` and cancel the
+    /// in-flight Touch ID evaluation, so the rebuild is deferred until Frost
+    /// returns to the idle locked state (see `rebuildIfDeferred`).
+    private var needsRebuildAfterAuth = false
+    /// Owns the ONE embedded `LAAuthenticationView` for the current context.
+    /// Shared by every overlay window's SwiftUI hierarchy so that SwiftUI
+    /// re-creating the representable (during layout, or across the two displays'
+    /// windows) can never produce a second view bound to the same context — two
+    /// views fight over the context's UI delegate and the loser's deallocation
+    /// cancels the evaluation. See `EmbeddedAuthHost`.
+    private let authHost = EmbeddedAuthHost()
 
     deinit {
         MainActor.assumeIsolated {
@@ -82,12 +94,37 @@ final class OverlayCoordinator: NSObject {
             self, name: NSApplication.didChangeScreenParametersNotification, object: nil)
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
+        needsRebuildAfterAuth = false
+        authHost.reset()
         controller = nil
         log.info("Overlay dismissed")
     }
 
     @objc private func screenParametersChanged() {
         guard !windows.isEmpty else { return }
+        // Never rebuild while a Touch ID evaluation is live: rebuild() recreates
+        // every window, which deallocates the embedded LAAuthenticationView and
+        // makes LocalAuthentication cancel with "View was deallocated". Hiding the
+        // menu bar for kiosk mode (at lock) and display sleep/wake (after idle)
+        // both fire this notification right when the first prompt is evaluating.
+        // Defer the rebuild until authentication ends.
+        if controller?.isAuthenticating == true {
+            needsRebuildAfterAuth = true
+            log.info("Screen parameters changed during auth; deferring overlay rebuild")
+            return
+        }
+        rebuild()
+        show()
+    }
+
+    /// Apply a rebuild that was deferred because the screen-parameters change
+    /// arrived mid-authentication. Called by `LockController` when it returns to
+    /// the idle locked state, so the overlay still picks up any real display
+    /// change that happened while the prompt was up.
+    func rebuildIfDeferred() {
+        guard needsRebuildAfterAuth, !windows.isEmpty else { return }
+        needsRebuildAfterAuth = false
+        log.info("Applying overlay rebuild deferred during auth")
         rebuild()
         show()
     }
@@ -142,7 +179,8 @@ final class OverlayCoordinator: NSObject {
         window.contentView = NSHostingView(rootView: LockOverlayView(
             controller: controller,
             showsEmbeddedAuthentication: showsEmbeddedAuthentication,
-            safeAreaInsets: screen.safeAreaInsets.swiftUIInsets
+            safeAreaInsets: screen.safeAreaInsets.swiftUIInsets,
+            authHost: authHost
         ))
         window.setFrame(screen.frame, display: true)
         return window
@@ -166,6 +204,7 @@ struct LockOverlayView: View {
     @ObservedObject var controller: LockController
     var showsEmbeddedAuthentication: Bool
     var safeAreaInsets: EdgeInsets
+    let authHost: EmbeddedAuthHost
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     // Scale the card width with Dynamic Type so large accessibility text sizes
     // have room to wrap instead of clipping against a hard-coded width.
@@ -314,6 +353,7 @@ struct LockOverlayView: View {
         VStack(spacing: 12) {
             if showsEmbeddedAuthentication, let context = controller.authenticationContext {
                 EmbeddedAuthenticationView(
+                    host: authHost,
                     authenticationContext: context,
                     onReady: controller.authenticationViewReady
                 )
@@ -452,32 +492,57 @@ struct LockOverlayView: View {
     }
 }
 
+/// Single source of truth for the embedded `LAAuthenticationView`. Owned by the
+/// `OverlayCoordinator` (one per overlay, NOT per SwiftUI view), it vends exactly
+/// one `LAAuthenticationView` per `LAContext`. Because every overlay window's
+/// SwiftUI hierarchy shares this one host, SwiftUI re-creating the representable —
+/// during a layout pass or across the two displays' windows — returns the SAME
+/// view instead of spawning a second one. That matters because each
+/// `LAAuthenticationView` registers itself as the context's UI delegate on init;
+/// two of them on one context fight over that delegate, and the loser's
+/// deallocation cancels the live evaluation with "View was deallocated" — the
+/// intermittent failure that forced an Esc-and-retry.
+@MainActor
+final class EmbeddedAuthHost {
+    private var view: EmbeddedAuthView?
+    private var boundContext: ObjectIdentifier?
+    private let log = Logger(subsystem: "dev.abdeen.frost", category: "Overlay")
+
+    func view(for context: LAContext, onReady: @escaping (LAContext) -> Void) -> EmbeddedAuthView {
+        let id = ObjectIdentifier(context)
+        if let view, boundContext == id { return view }
+        // New context (or first use): drop any prior view and build the one view.
+        view?.removeFromSuperview()
+        // `.regular` keeps the Touch ID control compact enough to sit inside the
+        // card. Combined with `.fixedSize()` on the SwiftUI side, the view is laid
+        // out at its own intrinsic size, so it never overflows its box the way a
+        // `.large` control forced into a smaller frame did.
+        let created = EmbeddedAuthView(context: context, controlSize: .regular)
+        created.setContentHuggingPriority(.required, for: .horizontal)
+        created.setContentHuggingPriority(.required, for: .vertical)
+        created.setContentCompressionResistancePriority(.required, for: .horizontal)
+        created.setContentCompressionResistancePriority(.required, for: .vertical)
+        created.onReadyToEvaluate = { onReady(context) }
+        view = created
+        boundContext = id
+        log.info("Created embedded auth view (shared host)")
+        return created
+    }
+
+    func reset() {
+        view?.removeFromSuperview()
+        view = nil
+        boundContext = nil
+    }
+}
+
 private struct EmbeddedAuthenticationView: NSViewRepresentable {
+    let host: EmbeddedAuthHost
     let authenticationContext: LAContext
     let onReady: (LAContext) -> Void
 
     func makeNSView(context: Context) -> EmbeddedAuthView {
-        // `.regular` keeps the Touch ID control compact enough to sit inside the
-        // card. Combined with `.fixedSize()` on the SwiftUI side, the view is
-        // laid out at its own intrinsic size, so it never overflows its box the
-        // way a `.large` control forced into a smaller frame did.
-        let view = EmbeddedAuthView(
-            context: authenticationContext,
-            controlSize: .regular
-        )
-        view.setContentHuggingPriority(.required, for: .horizontal)
-        view.setContentHuggingPriority(.required, for: .vertical)
-        view.setContentCompressionResistancePriority(.required, for: .horizontal)
-        view.setContentCompressionResistancePriority(.required, for: .vertical)
-        // Start evaluation only once the view has joined the window AND that
-        // window is key (see EmbeddedAuthView). Firing from makeNSView was too
-        // early on first presentation: the prompt had nowhere to render. Firing
-        // on mere attachment was still too early — the embedded sensor only arms
-        // while the window is key, and Frost (an LSUIElement agent) keys the
-        // window asynchronously, so the first attempt no-opped and you had to
-        // Esc-cancel and retry.
-        view.onReadyToEvaluate = { onReady(authenticationContext) }
-        return view
+        host.view(for: authenticationContext, onReady: onReady)
     }
 
     func updateNSView(_ view: EmbeddedAuthView, context: Context) {}
@@ -493,19 +558,22 @@ private struct EmbeddedAuthenticationView: NSViewRepresentable {
 /// already key) before evaluating. A fallback timer evaluates anyway if key
 /// status never arrives, preserving the Esc-cancel escape hatch rather than
 /// stranding the user. The notify hop also lets the first layout pass settle.
-private final class EmbeddedAuthView: LAAuthenticationView {
+final class EmbeddedAuthView: LAAuthenticationView {
     var onReadyToEvaluate: (() -> Void)?
     private var didNotify = false
     private var keyObserver: (any NSObjectProtocol)?
     private var fallback: DispatchWorkItem?
+    private let log = Logger(subsystem: "dev.abdeen.frost", category: "Overlay")
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard let window else {
             // Detached before we fired; drop any pending waiters.
+            log.info("Embedded auth view detached from window (notified=\(self.didNotify, privacy: .public))")
             teardownWaiters()
             return
         }
+        log.info("Embedded auth view attached to window (key=\(window.isKeyWindow, privacy: .public), notified=\(self.didNotify, privacy: .public))")
         guard !didNotify else { return }
 
         if window.isKeyWindow {
@@ -536,8 +604,9 @@ private final class EmbeddedAuthView: LAAuthenticationView {
         teardownWaiters()
         // One more hop so the first layout pass settles before evaluation.
         DispatchQueue.main.async { [weak self] in
-            guard self?.window != nil else { return }
-            self?.onReadyToEvaluate?()
+            guard let self, self.window != nil else { return }
+            self.log.info("Embedded auth view ready; starting evaluation")
+            self.onReadyToEvaluate?()
         }
     }
 
