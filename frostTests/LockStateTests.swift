@@ -79,14 +79,4 @@ struct AuthenticationResultTests {
         #expect(AuthenticationResult.unavailable("x") != .unavailable("y"))
         #expect(AuthenticationResult.unavailable("x") != .failed)
     }
-
-    // `prepareAuthenticationContext()` returns the distinct preparation type, so
-    // the dead `.success`/`.cancelled`/`.failed` cases no longer leak into the
-    // prepare step (only `.prepared` / `.unavailable` are reachable there).
-    @Test func authenticationPreparationEquality() {
-        #expect(AuthenticationPreparation.prepared == .prepared)
-        #expect(AuthenticationPreparation.unavailable("x") == .unavailable("x"))
-        #expect(AuthenticationPreparation.unavailable("x") != .unavailable("y"))
-        #expect(AuthenticationPreparation.prepared != .unavailable("x"))
-    }
 }

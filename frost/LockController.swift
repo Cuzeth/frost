@@ -16,7 +16,6 @@
 import AppKit
 import Combine
 import Foundation
-import LocalAuthentication
 import os
 
 enum LockState: Equatable {
@@ -72,7 +71,7 @@ final class LockController: ObservableObject {
 
     var isLocked: Bool { state != .unlocked }
     /// True while a Touch ID evaluation is live. The overlay reads this to avoid
-    /// rebuilding (and thereby deallocating the embedded auth view) mid-prompt.
+    /// rebuilding (and thereby churning window focus) while the prompt is up.
     var isAuthenticating: Bool { state == .authenticating }
 
     /// The configured unlock shortcut, formatted for the overlay hint.
@@ -80,7 +79,6 @@ final class LockController: ObservableObject {
     /// VoiceOver-friendly spelling of the unlock shortcut, e.g. "Control Option
     /// Command U".
     var unlockShortcutSpoken: String { settings.unlockShortcut.spokenString }
-    var authenticationContext: LAContext? { unlocker.currentContext }
 
     init(settings: SettingsStore) {
         self.settings = settings
@@ -274,9 +272,9 @@ final class LockController: ObservableObject {
         state = .locked
 
         // Optionally open Touch ID right away instead of waiting for the unlock
-        // shortcut. The overlay is already presented, so the embedded auth view
-        // picks up the prepared context on the next render. If preparation fails,
-        // armAuthentication leaves us idle with a notice — the shortcut can retry.
+        // shortcut. The overlay is already presented, so the system prompt comes
+        // straight up. If Touch ID is unavailable, armAuthentication leaves us
+        // idle with a notice — the shortcut can retry.
         if settings.startTouchIDWhenLocked {
             armAuthentication()
         }
@@ -310,7 +308,7 @@ final class LockController: ObservableObject {
 
     // MARK: - Unlock
 
-    /// The unlock shortcut opens the in-overlay Touch ID prompt from the idle
+    /// The unlock shortcut opens the system Touch ID prompt from the idle
     /// locked state. Touch ID is not armed automatically, so this is the entry
     /// point into authentication.
     func requestUnlock() {
@@ -318,50 +316,32 @@ final class LockController: ObservableObject {
         armAuthentication()
     }
 
-    /// Prepares a fresh `LAContext`, flips into the authenticating state, and
-    /// lets Esc through so the embedded Touch ID prompt is live. The
-    /// embedded auth view binds to this context and starts evaluation once it
-    /// reports ready. If the context can't be prepared, returns to the idle
-    /// locked state (with a notice when one is available) so the user is never
-    /// stranded. Only acts from the idle locked state.
+    /// Flips into the authenticating state, lets Esc through, and presents the
+    /// standard system Touch ID prompt. On success Frost unlocks; on cancel or
+    /// failure it returns to the idle locked state (the shortcut re-opens the
+    /// prompt); if Touch ID has become unavailable it re-locks with a notice so
+    /// the user is never stranded. Only acts from the idle locked state.
     @discardableResult
     private func armAuthentication() -> Bool {
         guard state == .locked else { return false }
         authenticationTask?.cancel()
         authenticationTask = nil
 
-        switch unlocker.prepareAuthenticationContext() {
-        case .prepared:
-            break
-        case .unavailable(let message):
-            reLock(notice: message)
-            return false
-        }
-
         state = .authenticating
 
-        // The embedded Touch ID prompt only arms when its window is key. Make
-        // Frost active and re-key the auth window now, before the embedded view
-        // evaluates, so the first attempt after launch works without an
-        // Esc-cancel and retry.
+        // Bring Frost forward and re-key the active-display window before
+        // evaluating. Frost is an LSUIElement agent, so it must be active for the
+        // system Touch ID prompt to take focus, and keying the active-display
+        // window biases the prompt onto the display where the lock was triggered.
         overlay.focusAuthenticationWindow()
 
-        // Keep the screen covered and input frozen while the embedded
-        // LocalAuthentication view is up. Esc is allowed through so the user can
-        // cancel the prompt and remain locked.
+        // Keep the screen covered and input frozen while the system prompt is up.
+        // Esc is allowed through so the user can cancel and remain locked.
         tap.setAuthenticating(true)
-        return true
-    }
-
-    func authenticationViewReady(for context: LAContext) {
-        guard state == .authenticating,
-              authenticationTask == nil,
-              unlocker.currentContext === context
-        else { return }
 
         authenticationTask = Task { [weak self] in
             guard let self else { return }
-            let result = await self.unlocker.authenticatePreparedContext(reason: "Unlock Frost")
+            let result = await self.unlocker.authenticate(reason: "Unlock Frost")
             if Task.isCancelled { return }
             self.authenticationTask = nil
             guard self.state == .authenticating else { return } // safety net won the race
@@ -375,6 +355,7 @@ final class LockController: ObservableObject {
                 self.reLock()
             }
         }
+        return true
     }
 
     private func reLock(notice: String? = nil) {
@@ -386,7 +367,7 @@ final class LockController: ObservableObject {
         }
         state = .locked
         // A screen-parameters change may have been deferred while we were
-        // authenticating; apply it now that destroying the embedded auth view is
+        // authenticating; apply it now that the prompt is gone and rebuilding is
         // safe, so the overlay reflects any real display change.
         overlay.rebuildIfDeferred()
         log.info("Re-locked after failed/cancelled auth")

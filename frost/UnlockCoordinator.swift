@@ -4,9 +4,8 @@
 //
 //  Wraps LocalAuthentication. Frost is Touch ID-only: the event tap suppresses
 //  keyboard input while locked, so a typed password is not a viable unlock path.
-//  The unlock evaluation uses .deviceOwnerAuthenticationWithBiometrics on a
-//  prepared LAContext that the overlay binds to an embedded LAAuthenticationView,
-//  keeping the Touch ID prompt inside Frost's overlay.
+//  Unlocking evaluates .deviceOwnerAuthenticationWithBiometrics on a fresh
+//  LAContext, which presents the standard system Touch ID prompt.
 //
 
 import Foundation
@@ -18,13 +17,7 @@ enum TouchIDCheck: Equatable {
     case unavailable(String)
 }
 
-/// Outcome of *preparing* (not yet evaluating) the authentication context.
-enum AuthenticationPreparation: Equatable {
-    case prepared
-    case unavailable(String)
-}
-
-/// Outcome of *evaluating* Touch ID on a prepared context.
+/// Outcome of *evaluating* Touch ID.
 enum AuthenticationResult: Equatable {
     case success
     case cancelled
@@ -37,8 +30,6 @@ final class UnlockCoordinator {
     private var context: LAContext?
     private let policy: LAPolicy = .deviceOwnerAuthenticationWithBiometrics
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Unlock")
-
-    var currentContext: LAContext? { context }
 
     /// Frost is Touch ID-only. Check before suppressing input so machines
     /// without a usable Touch ID path never enter a lock.
@@ -54,9 +45,11 @@ final class UnlockCoordinator {
         return .available
     }
 
-    /// Creates the context that the overlay binds to LAAuthenticationView.
-    /// Evaluation starts only after the embedded view reports that it exists.
-    func prepareAuthenticationContext() -> AuthenticationPreparation {
+    /// Presents the standard system Touch ID prompt and evaluates it. A fresh
+    /// `LAContext` is created per call (a context evaluates only once) and held so
+    /// an in-flight prompt can be cancelled via `cancel()`; it is cleared when the
+    /// evaluation ends.
+    func authenticate(reason: String) async -> AuthenticationResult {
         let context = LAContext()
         // Empty fallback title hides the password button — Touch ID only.
         context.localizedFallbackTitle = ""
@@ -69,15 +62,6 @@ final class UnlockCoordinator {
         }
 
         self.context = context
-        return .prepared
-    }
-
-    /// Runs Touch ID on the prepared, overlay-bound context.
-    func authenticatePreparedContext(reason: String) async -> AuthenticationResult {
-        guard let context else {
-            return .unavailable(Self.touchIDUnavailableMessage(nil, whileLocked: true))
-        }
-
         let result: AuthenticationResult = await withCheckedContinuation { continuation in
             context.evaluatePolicy(policy,
                                    localizedReason: reason) { success, error in

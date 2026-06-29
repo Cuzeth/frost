@@ -50,12 +50,12 @@ When you press the unlock shortcut, Frost keeps the overlay and event tap active
 and asks macOS to authenticate with
 `LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)` — Touch ID
 only, no password fallback, because keyboard input stays suppressed while locked.
-Frost binds that context to an embedded `LAAuthenticationView` inside the overlay,
-so the Touch ID affordance stays visible at Frost's overlay level. The embedded
-view is placed on the display where the lock was triggered, not always the
-menu-bar display. If authentication succeeds, Frost tears everything down and
-restores normal input. If it is cancelled with Escape, Frost returns to the idle
-locked state and the unlock shortcut re-opens the prompt.
+This presents the standard system Touch ID prompt. Frost activates and keys the
+overlay window on the display where the lock was triggered, not always the
+menu-bar display, so the prompt appears where the user is looking. If
+authentication succeeds, Frost tears everything down and restores normal input.
+If it is cancelled with Escape, Frost returns to the idle locked state and the
+unlock shortcut re-opens the prompt.
 
 The default unlock shortcut is `Control-Option-Command-U`.
 
@@ -254,11 +254,10 @@ LAContext.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics)
 ```
 
 Before locking, Frost verifies that the Mac reports Touch ID through
-`.deviceOwnerAuthenticationWithBiometrics`. During unlock, the prepared
-`LAContext` (with an empty `localizedFallbackTitle`, so no password button) is
-bound to an embedded `LAAuthenticationView` in the overlay, then evaluated with
-`.deviceOwnerAuthenticationWithBiometrics` — Touch ID only, since keyboard input
-stays suppressed while locked.
+`.deviceOwnerAuthenticationWithBiometrics`. During unlock, a fresh `LAContext`
+(with an empty `localizedFallbackTitle`, so no password button) is evaluated with
+`.deviceOwnerAuthenticationWithBiometrics`, presenting the standard system Touch
+ID prompt — Touch ID only, since keyboard input stays suppressed while locked.
 
 ### Power Assertions
 
