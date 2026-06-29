@@ -172,30 +172,37 @@ struct LockOverlayView: View {
     @ScaledMetric private var cardWidth: CGFloat = 430
 
     var body: some View {
-        ZStack {
-            // A stronger scrim (paired with an opaque card) when the user has
-            // asked to reduce transparency, so text stays legible over a busy
-            // desktop showing through.
-            Color.black.opacity(reduceTransparency ? 0.6 : 0.35).ignoresSafeArea()
-            card
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(safeAreaInsets)
+        GeometryReader { proxy in
+            let availableWidth = max(
+                280,
+                proxy.size.width - safeAreaInsets.leading - safeAreaInsets.trailing - 32
+            )
+
+            ZStack {
+                // A stronger scrim (paired with an opaque card) when the user has
+                // asked to reduce transparency, so text stays legible over a busy
+                // desktop showing through.
+                Color.black.opacity(reduceTransparency ? 0.6 : 0.35).ignoresSafeArea()
+                card(maxWidth: availableWidth)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(safeAreaInsets)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    @ViewBuilder private var card: some View {
+    @ViewBuilder private func card(maxWidth: CGFloat) -> some View {
         switch controller.state {
         case .recovery(let recovery):
-            recoveryCard(recovery)
+            recoveryCard(recovery, width: min(cardWidth + 10, maxWidth))
         default:
-            lockedCard
+            lockedCard(width: min(cardWidth, maxWidth))
         }
     }
 
     private var authenticating: Bool { controller.state == .authenticating }
 
-    private var lockedCard: some View {
+    private func lockedCard(width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 16) {
                 authenticationMark
@@ -244,7 +251,7 @@ struct LockOverlayView: View {
             }
             .padding(24)
         }
-        .frame(width: cardWidth)
+        .frame(width: width)
         .background(cardBackground(cornerRadius: 22))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -380,7 +387,7 @@ struct LockOverlayView: View {
             .background(Color.yellow, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
-    private func recoveryCard(_ recovery: RecoveryState) -> some View {
+    private func recoveryCard(_ recovery: RecoveryState, width: CGFloat) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 40, weight: .semibold))
@@ -395,28 +402,53 @@ struct LockOverlayView: View {
                 .fixedSize(horizontal: false, vertical: true)
             // Promote the primary action and push the destructive Quit to the
             // trailing edge so the button hierarchy is unambiguous.
-            HStack(spacing: 12) {
-                if recovery.showsAccessibilitySettings {
-                    Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
-                        .buttonStyle(.borderedProminent)
-                    Button("Dismiss") { controller.dismissRecovery() }
-                    Spacer(minLength: 0)
-                    Button("Quit Frost") { controller.quitFrost() }
-                } else {
-                    if recovery.allowsRetry {
-                        Button("Try Again") { controller.retryRecovery() }
-                            .buttonStyle(.borderedProminent)
-                            .keyboardShortcut(.defaultAction)
-                    }
-                    Button("Dismiss") { controller.dismissRecovery() }
-                }
+            ViewThatFits(in: .horizontal) {
+                recoveryButtons(recovery)
+                stackedRecoveryButtons(recovery)
             }
             .padding(.top, 4)
         }
         .padding(28)
-        .frame(width: cardWidth + 10)
+        .frame(width: width)
         .background(cardBackground(cornerRadius: 20))
         .accessibilityElement(children: .contain)
+    }
+
+    private func recoveryButtons(_ recovery: RecoveryState) -> some View {
+        HStack(spacing: 12) {
+            if recovery.showsAccessibilitySettings {
+                Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+                    .buttonStyle(.borderedProminent)
+                Button("Dismiss") { controller.dismissRecovery() }
+                Spacer(minLength: 0)
+                Button("Quit Frost") { controller.quitFrost() }
+            } else {
+                if recovery.allowsRetry {
+                    Button("Try Again") { controller.retryRecovery() }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                }
+                Button("Dismiss") { controller.dismissRecovery() }
+            }
+        }
+    }
+
+    private func stackedRecoveryButtons(_ recovery: RecoveryState) -> some View {
+        VStack(spacing: 10) {
+            if recovery.showsAccessibilitySettings {
+                Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+                    .buttonStyle(.borderedProminent)
+                Button("Dismiss") { controller.dismissRecovery() }
+                Button("Quit Frost") { controller.quitFrost() }
+            } else {
+                if recovery.allowsRetry {
+                    Button("Try Again") { controller.retryRecovery() }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                }
+                Button("Dismiss") { controller.dismissRecovery() }
+            }
+        }
     }
 }
 

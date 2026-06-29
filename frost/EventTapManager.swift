@@ -100,6 +100,12 @@ final class EventTapManager {
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: port, enable: true)
+        guard CGEvent.tapIsEnabled(tap: port) else {
+            log.fault("CGEvent tap was created but could not be enabled")
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            CFMachPortInvalidate(port)
+            return false
+        }
 
         tap = port
         runLoopSource = source

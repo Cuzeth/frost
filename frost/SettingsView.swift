@@ -39,11 +39,13 @@ struct SettingsView: View {
                     Spacer()
                     ShortcutRecorder(shortcut: lockBinding, allowsClear: true)
                         .frame(width: 170, height: 24)
+                    Button("Clear") { settings.lockShortcut = nil }
+                        .disabled(settings.lockShortcut == nil)
                 }
             } header: {
                 Text("Lock Shortcut")
             } footer: {
-                Text("Optional. A system-wide hotkey that locks input from anywhere. Click the field and press a combo to set it; press ⌫ to clear or ⎋ to cancel. If it matches Unlock, Frost clears it.")
+                Text("Optional. A system-wide hotkey that locks input from anywhere. Click the field and press a combo to set it; press ⌫ or Clear to remove it, or ⎋ to cancel. If it matches Unlock, Frost clears it.")
                     .foregroundStyle(.secondary)
             }
 

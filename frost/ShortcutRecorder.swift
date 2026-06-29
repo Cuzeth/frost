@@ -91,6 +91,15 @@ final class RecorderField: NSView {
         if isRecording { return "Recording. Type a shortcut." }
         return shortcut?.spokenString ?? "Not set"
     }
+    override func accessibilityPerformPress() -> Bool {
+        if isRecording {
+            stopRecording()
+        } else {
+            window?.makeFirstResponder(self)
+            isRecording = true
+        }
+        return true
+    }
 
     override func mouseDown(with event: NSEvent) {
         if isRecording {

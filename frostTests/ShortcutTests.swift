@@ -169,11 +169,13 @@ struct ShortcutTests {
         #expect(Shortcut.keyName(for: UInt16(kVK_F12)) == "F12")
     }
 
-    @Test func keyNameLetterKeysAreUppercased() {
-        // Assumes a Latin (ANSI-capable) keyboard layout — what Frost's display
-        // targets. character(forKeyCode:) goes through the live layout.
-        #expect(Shortcut.keyName(for: UInt16(kVK_ANSI_A)) == "A")
-        #expect(Shortcut.keyName(for: UInt16(kVK_ANSI_U)) == "U")
+    @Test func printableKeyNameComesFromTheCurrentKeyboardLayout() {
+        // The exact glyph is layout-dependent; the contract is that a known
+        // printable key resolves to a displayable name rather than the raw-code
+        // fallback used for unknown keys.
+        let name = Shortcut.keyName(for: UInt16(kVK_ANSI_A))
+        #expect(!name.isEmpty)
+        #expect(!name.hasPrefix("Key "))
     }
 
     @Test func keyNameUnknownKeyFallsBack() {

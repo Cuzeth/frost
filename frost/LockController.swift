@@ -249,7 +249,11 @@ final class LockController: ObservableObject {
         // Recognize the latest configured unlock shortcut for this session.
         tap.unlockShortcut = settings.unlockShortcut
 
+        // Arm the DEBUG safety net BEFORE enabling any input-suppressing tap.
+        // If startup fails, we stop it immediately because input was not locked.
+        startDebugAutoUnlock()
         guard tap.start() else {
+            stopDebugAutoUnlock()
             enterRecovery(RecoveryState(
                 message: """
                 Couldn't create the input tap. Confirm Accessibility is enabled \
@@ -259,8 +263,6 @@ final class LockController: ObservableObject {
             return
         }
 
-        // Input is now suppressed — arm the safety net BEFORE anything else.
-        startDebugAutoUnlock()
         overlay.present(controller: self)
         enterKioskMode()
         sleep.apply(preventScreenSaver: settings.preventScreenSaver,

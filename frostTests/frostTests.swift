@@ -23,8 +23,11 @@ struct frostTests {
         #expect(!Shortcut.defaultUnlock.modifierFlags.isEmpty)
     }
 
-    /// The factory unlock chord renders as ⌃⌥⌘U (Latin keyboard layout).
+    /// The factory unlock chord renders its modifiers in canonical order. The
+    /// final key name comes from the user's current keyboard layout.
     @Test func defaultUnlockDisplaysAsExpected() {
-        #expect(Shortcut.defaultUnlock.displayString == "⌃⌥⌘U")
+        let display = Shortcut.defaultUnlock.displayString
+        #expect(display.hasPrefix("⌃⌥⌘"))
+        #expect(display.count > 3)
     }
 }
