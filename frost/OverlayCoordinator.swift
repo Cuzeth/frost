@@ -350,10 +350,10 @@ struct LockOverlayView: View {
         HStack(spacing: 8) {
             statusPill(icon: "keyboard", text: "Input paused")
             statusPill(icon: "cursorarrow", text: "Pointer frozen")
-            statusPill(icon: "touchid", text: "Local auth")
+            statusPill(icon: "touchid", text: "Secured")
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Input paused, pointer frozen, local authentication")
+        .accessibilityLabel("Input paused, pointer frozen.")
     }
 
     private func keycap(_ text: String) -> some View {
