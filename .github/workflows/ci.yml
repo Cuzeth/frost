@@ -15,33 +15,43 @@ concurrency:
 jobs:
   build-test:
     name: Build & test
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
-      # Frost is authored with very new Xcode tooling (objectVersion 77,
-      # SWIFT_DEFAULT_ACTOR_ISOLATION, the macOS 26 SDK). Select the newest Xcode
-      # the runner provides. If the hosted image is older than the project
-      # requires, bump the runner image (e.g. a beta `macos-*` label) or pin a
-      # specific Xcode path here.
-      - name: Select newest Xcode
+      # Use the runner's default stable Xcode. Do not auto-select the "newest"
+      # Xcode app because that can accidentally pick a release candidate.
+      - name: Show Xcode toolchain
         run: |
-          ls -d /Applications/Xcode*.app 2>/dev/null || true
-          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -n1)/Contents/Developer"
+          set -euxo pipefail
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
           xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+          swift --version
+
+      # Avoid stale DerivedData / asset catalog state between runner image changes.
+      - name: Clean Xcode state
+        run: |
+          rm -rf "$RUNNER_TEMP/DerivedData"
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          rm -rf ~/Library/Caches/com.apple.dt.Xcode
 
       # Build the app and run the frostTests unit suite. Code signing is disabled
       # because CI only needs to compile and run logic tests — it does not
       # produce a distributable, signed, notarized artifact (that stays local;
       # see RELEASING.md).
       - name: Build & test (no code signing)
+        env:
+          NSUnbufferedIO: YES
         run: |
-          set -o pipefail
+          set -euxo pipefail
+
           xcodebuild test \
             -project frost.xcodeproj \
             -scheme frost \
             -destination 'platform=macOS' \
-            -resultBundlePath TestResults.xcresult \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/TestResults.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -52,5 +62,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TestResults
-          path: TestResults.xcresult
+          path: ${{ runner.temp }}/TestResults.xcresult
           if-no-files-found: ignore
