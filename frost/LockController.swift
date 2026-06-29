@@ -454,6 +454,7 @@ final class LockController: ObservableObject {
         unlocker.cancel()
         overlay.dismiss()
         state = .unlocked
+        inactivity.resetIdleBaseline()
         log.info("Teardown complete: tap released, cursor restored, presentation options cleared, assertions released")
     }
 

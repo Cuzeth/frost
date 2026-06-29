@@ -13,11 +13,16 @@ import os
 @MainActor
 final class InactivityLockMonitor {
     private weak var settings: SettingsStore?
-    private weak var lock: LockController?
+    private var isLocked: (() -> Bool)?
+    private var lockAction: (() -> Void)?
     private var pollTask: Task<Void, Never>?
     private var snoozedUntil: Date?
+    private var baselineDate: Date?
+    private var observedInactivityLock: InactivityLockOption?
     private let failedLockSnoozeSeconds: TimeInterval = 60
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Inactivity")
+    private let now: () -> Date
+    private let idleSeconds: () -> TimeInterval
 
     /// `kCGAnyInputEventType` (raw value `0xFFFFFFFF`): the documented sentinel
     /// for "seconds since the last event of ANY type", i.e. true input idle time.
@@ -27,7 +32,17 @@ final class InactivityLockMonitor {
     /// case `.tapDisabledByUserInput`. Do NOT "simplify" this back to `.null`
     /// (raw value 0): that measures idle time since the last *null* event, which
     /// real input never resets, so auto-lock would misfire.
-    private static let anyInputEventType = CGEventType(rawValue: ~0)!
+    nonisolated private static var anyInputEventType: CGEventType {
+        CGEventType(rawValue: ~0)!
+    }
+
+    init(
+        now: @escaping () -> Date = { Date() },
+        idleSeconds: @escaping () -> TimeInterval = InactivityLockMonitor.sessionIdleSeconds
+    ) {
+        self.now = now
+        self.idleSeconds = idleSeconds
+    }
 
     deinit {
         MainActor.assumeIsolated {
@@ -36,9 +51,29 @@ final class InactivityLockMonitor {
     }
 
     func start(settings: SettingsStore, lock: LockController) {
+        start(
+            settings: settings,
+            isLocked: { [weak lock] in lock?.isLocked ?? true },
+            lock: { [weak lock] in lock?.lock() }
+        )
+    }
+
+    func start(
+        settings: SettingsStore,
+        isLocked: @escaping () -> Bool,
+        lock: @escaping () -> Void,
+        pollAutomatically: Bool = true
+    ) {
         self.settings = settings
-        self.lock = lock
+        self.isLocked = isLocked
+        self.lockAction = lock
+        observedInactivityLock = settings.inactivityLock
+        resetIdleBaseline()
         pollTask?.cancel()
+        guard pollAutomatically else {
+            pollTask = nil
+            return
+        }
 
         pollTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
@@ -54,29 +89,53 @@ final class InactivityLockMonitor {
         pollTask = nil
     }
 
-    func snoozeAfterFailedLock() {
-        snoozedUntil = Date().addingTimeInterval(failedLockSnoozeSeconds)
+    /// Reset Frost's local auto-lock clock after user-visible actions that may not
+    /// update CoreGraphics' keyboard/mouse idle timer (notably Touch ID unlock).
+    func resetIdleBaseline() {
+        baselineDate = now()
+        snoozedUntil = nil
     }
 
-    private func poll() {
+    func snoozeAfterFailedLock() {
+        let date = now()
+        baselineDate = date
+        snoozedUntil = date.addingTimeInterval(failedLockSnoozeSeconds)
+    }
+
+    func poll() {
         guard let settings,
-              let lock,
-              !lock.isLocked,
+              let isLocked,
+              let lockAction,
+              !isLocked(),
               let threshold = settings.inactivityLock.seconds
         else { return }
 
+        if settings.inactivityLock != observedInactivityLock {
+            observedInactivityLock = settings.inactivityLock
+            resetIdleBaseline()
+            return
+        }
+
         if let snoozedUntil {
-            guard Date() >= snoozedUntil else { return }
+            guard now() >= snoozedUntil else { return }
             self.snoozedUntil = nil
         }
 
-        let idleSeconds = CGEventSource.secondsSinceLastEventType(
+        guard let baselineDate,
+              now().timeIntervalSince(baselineDate) >= threshold
+        else { return }
+
+        let idleSeconds = idleSeconds()
+        if idleSeconds >= threshold {
+            log.info("Inactivity threshold reached; locking")
+            lockAction()
+        }
+    }
+
+    nonisolated private static func sessionIdleSeconds() -> TimeInterval {
+        CGEventSource.secondsSinceLastEventType(
             .combinedSessionState,
             eventType: Self.anyInputEventType
         )
-        if idleSeconds >= threshold {
-            log.info("Inactivity threshold reached; locking")
-            lock.lock()
-        }
     }
 }
