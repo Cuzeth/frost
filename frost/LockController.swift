@@ -74,6 +74,9 @@ final class LockController: ObservableObject {
 
     /// The configured unlock shortcut, formatted for the overlay hint.
     var unlockShortcutDisplay: String { settings.unlockShortcut.displayString }
+    /// VoiceOver-friendly spelling of the unlock shortcut, e.g. "Control Option
+    /// Command U".
+    var unlockShortcutSpoken: String { settings.unlockShortcut.spokenString }
     var authenticationContext: LAContext? { unlocker.currentContext }
 
     init(settings: SettingsStore) {
@@ -88,6 +91,9 @@ final class LockController: ObservableObject {
         }
         tap.onTapReenabled = { [weak self] message in
             self?.tapRecoveryNotice = message
+        }
+        tap.onTapReviveFailed = { [weak self] in
+            self?.handleTapReviveFailure()
         }
         installTerminationHandler()
         installLockHotKeyMonitor()
@@ -325,9 +331,6 @@ final class LockController: ObservableObject {
         case .unavailable(let message):
             reLock(notice: message)
             return false
-        case .success, .cancelled, .failed:
-            reLock()
-            return false
         }
 
         state = .authenticating
@@ -358,8 +361,6 @@ final class LockController: ObservableObject {
             self.authenticationTask = nil
             guard self.state == .authenticating else { return } // safety net won the race
             switch result {
-            case .prepared:
-                self.reLock()
             case .success:
                 self.finishUnlock()
             case .unavailable(let message):
@@ -385,6 +386,24 @@ final class LockController: ObservableObject {
     private func finishUnlock() {
         teardown()
         log.info("Unlocked")
+    }
+
+    /// macOS disabled the event tap and it could not be re-enabled while locked,
+    /// so input is no longer suppressed and the in-tap unlock chord is dead.
+    /// Restore everything and escalate to a prominent recovery overlay — whose
+    /// buttons are clickable now that the pointer is live again — rather than
+    /// leaving the user behind a passive notice that falsely implies success.
+    private func handleTapReviveFailure() {
+        guard state == .locked || state == .authenticating else { return }
+        log.fault("Event tap could not be re-enabled; unlocking and showing recovery")
+        teardown()
+        enterRecovery(RecoveryState(
+            message: """
+            macOS disabled Frost's input tap and it could not be re-enabled, so \
+            input has been unlocked. Press Try Again to re-lock, or Dismiss to \
+            stay unlocked.
+            """
+        ))
     }
 
     // MARK: - Recovery
@@ -433,6 +452,18 @@ final class LockController: ObservableObject {
         unlocker.cancel()
         overlay.dismiss()
         state = .unlocked
+        log.info("Teardown complete: tap released, cursor restored, presentation options cleared, assertions released")
+    }
+
+    /// Final backstop for process-termination paths that bypass `teardown()`
+    /// (e.g. `NSApp.terminate` from the menu or Settings, which otherwise rely on
+    /// `@StateObject` deinit running at exit — not guaranteed by SwiftUI).
+    /// Idempotent and a no-op when already unlocked; called from
+    /// `AppDelegate.applicationWillTerminate` on the main thread.
+    func tearDownForTermination() {
+        guard state != .unlocked else { return }
+        log.notice("Termination while active; running teardown backstop")
+        teardown()
     }
 
     // MARK: - DEBUG auto-unlock safety net

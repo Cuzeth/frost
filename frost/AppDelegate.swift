@@ -28,4 +28,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SettingsWindowController.shared.show()
         return true
     }
+
+    // Safety backstop: if Frost is told to terminate while a lock (or recovery)
+    // is still active — e.g. a plain NSApp.terminate that bypasses teardown() —
+    // restore the cursor, presentation options, tap, and power assertions here
+    // rather than depending on @StateObject deinit running at exit. Runs on the
+    // main thread, so the @MainActor hop is safe; no-op when already unlocked.
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            LockController.shared?.tearDownForTermination()
+        }
+    }
 }

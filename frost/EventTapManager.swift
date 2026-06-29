@@ -32,6 +32,11 @@ final class EventTapManager {
     var onUnlockChord: (() -> Void)?
     /// Invoked if macOS disables the tap and Frost re-enables it.
     var onTapReenabled: ((String) -> Void)?
+    /// Invoked if macOS disables the tap and Frost CANNOT re-enable it. The lock
+    /// is then effectively broken — the unlock chord is recognized only inside
+    /// this callback, so a dead tap kills the primary unlock path — and the
+    /// controller must escalate to a visible recovery state, not a passive notice.
+    var onTapReviveFailed: (() -> Void)?
 
     /// The shortcut that triggers unlock, recognized inside the callback while
     /// input is suppressed. Set by LockController from the user's settings.
@@ -155,13 +160,23 @@ final class EventTapManager {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if shouldSuppress, let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
-                setCursorFrozen(true)
-                let message = type == .tapDisabledByTimeout
-                    ? "The input tap was disabled by macOS after it stopped responding, then re-enabled."
-                    : "The input tap was disabled by macOS, then re-enabled."
-                log.error("Tap disabled by system; re-enabled")
-                pinCursor()
-                Task { @MainActor [weak self] in self?.onTapReenabled?(message) }
+                // tapEnable returns no status, so confirm the re-enable actually
+                // took before reassuring the user. If it did NOT, input is no
+                // longer suppressed and the in-tap unlock chord is dead — escalate
+                // to a visible recovery state instead of a misleading "re-enabled"
+                // notice.
+                if CGEvent.tapIsEnabled(tap: tap) {
+                    setCursorFrozen(true)
+                    pinCursor()
+                    let message = type == .tapDisabledByTimeout
+                        ? "The input tap was disabled by macOS after it stopped responding, then re-enabled."
+                        : "The input tap was disabled by macOS, then re-enabled."
+                    log.error("Tap disabled by system; re-enabled")
+                    Task { @MainActor [weak self] in self?.onTapReenabled?(message) }
+                } else {
+                    log.fault("Tap disabled by system and re-enable FAILED; escalating to recovery")
+                    Task { @MainActor [weak self] in self?.onTapReviveFailed?() }
+                }
             }
             return false
         case .keyDown:
@@ -179,14 +194,16 @@ final class EventTapManager {
         }
     }
 
+    // Pointer events that move or click the cursor and therefore warrant a
+    // re-pin. Scroll-wheel events are still swallowed (the default branch returns
+    // true) but never move the cursor, so re-pinning on them is wasted work.
     private func isPointerEvent(_ type: CGEventType) -> Bool {
         switch type {
         case .leftMouseDown, .leftMouseUp,
              .rightMouseDown, .rightMouseUp,
              .otherMouseDown, .otherMouseUp,
              .mouseMoved,
-             .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
-             .scrollWheel:
+             .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             return true
         default:
             return false

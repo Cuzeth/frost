@@ -82,6 +82,16 @@ final class RecorderField: NSView {
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { true }
 
+    // VoiceOver: present as a button whose value is the spoken shortcut, since the
+    // glyph label ("⌃⌥⌘U") is announced poorly.
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    override func accessibilityLabel() -> String? { "Keyboard shortcut" }
+    override func accessibilityValue() -> Any? {
+        if isRecording { return "Recording. Type a shortcut." }
+        return shortcut?.spokenString ?? "Not set"
+    }
+
     override func mouseDown(with event: NSEvent) {
         if isRecording {
             stopRecording()
@@ -92,7 +102,7 @@ final class RecorderField: NSView {
     }
 
     override func resignFirstResponder() -> Bool {
-        isRecording = false
+        if isRecording { isRecording = false }
         return super.resignFirstResponder()
     }
 
@@ -155,6 +165,6 @@ final class RecorderField: NSView {
     private var displayText: String {
         if isRecording { return "Type shortcut…" }
         if let shortcut { return shortcut.displayString }
-        return allowsClear ? "Click to record" : "—"
+        return allowsClear ? "Click to record" : "Click to set"
     }
 }

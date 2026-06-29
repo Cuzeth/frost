@@ -11,14 +11,21 @@
 
 import Foundation
 import LocalAuthentication
+import os
 
 enum TouchIDCheck: Equatable {
     case available
     case unavailable(String)
 }
 
-enum AuthenticationResult: Equatable {
+/// Outcome of *preparing* (not yet evaluating) the authentication context.
+enum AuthenticationPreparation: Equatable {
     case prepared
+    case unavailable(String)
+}
+
+/// Outcome of *evaluating* Touch ID on a prepared context.
+enum AuthenticationResult: Equatable {
     case success
     case cancelled
     case failed
@@ -29,6 +36,7 @@ enum AuthenticationResult: Equatable {
 final class UnlockCoordinator {
     private var context: LAContext?
     private let policy: LAPolicy = .deviceOwnerAuthenticationWithBiometrics
+    private let log = Logger(subsystem: "dev.abdeen.frost", category: "Unlock")
 
     var currentContext: LAContext? { context }
 
@@ -48,7 +56,7 @@ final class UnlockCoordinator {
 
     /// Creates the context that the overlay binds to LAAuthenticationView.
     /// Evaluation starts only after the embedded view reports that it exists.
-    func prepareAuthenticationContext() -> AuthenticationResult {
+    func prepareAuthenticationContext() -> AuthenticationPreparation {
         let context = LAContext()
         // Empty fallback title hides the password button — Touch ID only.
         context.localizedFallbackTitle = ""
@@ -80,6 +88,12 @@ final class UnlockCoordinator {
         if self.context === context {
             self.context = nil
         }
+        switch result {
+        case .success: log.info("Touch ID succeeded")
+        case .cancelled: log.info("Touch ID cancelled")
+        case .failed: log.info("Touch ID failed")
+        case .unavailable: log.error("Touch ID unavailable during unlock")
+        }
         return result
     }
 
@@ -90,7 +104,7 @@ final class UnlockCoordinator {
         context = nil
     }
 
-    nonisolated private static func authenticationResult(
+    nonisolated static func authenticationResult(
         success: Bool,
         error: Error?
     ) -> AuthenticationResult {

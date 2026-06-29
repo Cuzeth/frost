@@ -19,11 +19,13 @@
 import AppKit
 import LocalAuthentication
 import LocalAuthenticationEmbeddedUI
+import os
 import SwiftUI
 
 @MainActor
 final class OverlayCoordinator: NSObject {
     private var windows: [NSWindow] = []
+    private let log = Logger(subsystem: "dev.abdeen.frost", category: "Overlay")
     /// Index into `windows` of the active-display window: it hosts the embedded
     /// authentication view and becomes key so the prompt is focused where the
     /// user is. Recomputed on every rebuild.
@@ -47,6 +49,7 @@ final class OverlayCoordinator: NSObject {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil)
         show()
+        log.info("Overlay presented on \(self.windows.count, privacy: .public) display(s)")
     }
 
     private func show() {
@@ -80,6 +83,7 @@ final class OverlayCoordinator: NSObject {
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
         controller = nil
+        log.info("Overlay dismissed")
     }
 
     @objc private func screenParametersChanged() {
@@ -162,10 +166,17 @@ struct LockOverlayView: View {
     @ObservedObject var controller: LockController
     var showsEmbeddedAuthentication: Bool
     var safeAreaInsets: EdgeInsets
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    // Scale the card width with Dynamic Type so large accessibility text sizes
+    // have room to wrap instead of clipping against a hard-coded width.
+    @ScaledMetric private var cardWidth: CGFloat = 430
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.35).ignoresSafeArea()
+            // A stronger scrim (paired with an opaque card) when the user has
+            // asked to reduce transparency, so text stays legible over a busy
+            // desktop showing through.
+            Color.black.opacity(reduceTransparency ? 0.6 : 0.35).ignoresSafeArea()
             card
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(safeAreaInsets)
@@ -233,13 +244,27 @@ struct LockOverlayView: View {
             }
             .padding(24)
         }
-        .frame(width: 430)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .frame(width: cardWidth)
+        .background(cardBackground(cornerRadius: 22))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.16), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.28), radius: 32, y: 18)
+        .accessibilityElement(children: .contain)
+    }
+
+    /// Card fill: translucent material normally, but a near-opaque solid when the
+    /// user has reduced transparency, so legibility never depends on the desktop
+    /// showing through behind the text.
+    @ViewBuilder
+    private func cardBackground(cornerRadius: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        if reduceTransparency {
+            shape.fill(Color.black.opacity(0.85))
+        } else {
+            shape.fill(.ultraThinMaterial)
+        }
     }
 
     private var authenticationMark: some View {
@@ -254,6 +279,7 @@ struct LockOverlayView: View {
                 .foregroundStyle(authenticating ? Color.accentColor : Color.primary)
         }
         .frame(width: 72, height: 72)
+        .accessibilityHidden(true)
     }
 
     private var unlockPrompt: some View {
@@ -273,6 +299,8 @@ struct LockOverlayView: View {
         }
         .padding(16)
         .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Unlock shortcut: \(controller.unlockShortcutSpoken). Press to open the Touch ID prompt.")
     }
 
     private var authenticatingPrompt: some View {
@@ -308,6 +336,8 @@ struct LockOverlayView: View {
             statusPill(icon: "cursorarrow", text: "Pointer frozen")
             statusPill(icon: "touchid", text: "Local auth")
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Input paused, pointer frozen, local authentication")
     }
 
     private func keycap(_ text: String) -> some View {
@@ -335,12 +365,19 @@ struct LockOverlayView: View {
             .background(Color.white.opacity(0.07), in: Capsule())
     }
 
+    // A filled banner with dark text, so the warning meets contrast over any
+    // desktop and regardless of reduce-transparency — yellow text on translucent
+    // material did not.
     private func warningText(_ message: String, font: Font = .footnote) -> some View {
         Text(message)
-            .font(font)
-            .foregroundStyle(.yellow)
+            .font(font.weight(.medium))
+            .foregroundStyle(.black)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(Color.yellow, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
     private func recoveryCard(_ recovery: RecoveryState) -> some View {
@@ -348,28 +385,38 @@ struct LockOverlayView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 40, weight: .semibold))
                 .foregroundStyle(.yellow)
+                .accessibilityHidden(true)
             Text(recovery.title)
                 .font(.title2.weight(.semibold))
             Text(recovery.message)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            // Promote the primary action and push the destructive Quit to the
+            // trailing edge so the button hierarchy is unambiguous.
             HStack(spacing: 12) {
                 if recovery.showsAccessibilitySettings {
                     Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+                        .buttonStyle(.borderedProminent)
+                    Button("Dismiss") { controller.dismissRecovery() }
+                    Spacer(minLength: 0)
                     Button("Quit Frost") { controller.quitFrost() }
+                } else {
+                    if recovery.allowsRetry {
+                        Button("Try Again") { controller.retryRecovery() }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut(.defaultAction)
+                    }
+                    Button("Dismiss") { controller.dismissRecovery() }
                 }
-                if recovery.allowsRetry {
-                    Button("Try Again") { controller.retryRecovery() }
-                        .keyboardShortcut(.defaultAction)
-                }
-                Button("Dismiss") { controller.dismissRecovery() }
             }
             .padding(.top, 4)
         }
         .padding(28)
-        .frame(width: 440)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .frame(width: cardWidth + 10)
+        .background(cardBackground(cornerRadius: 20))
+        .accessibilityElement(children: .contain)
     }
 }
 

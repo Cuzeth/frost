@@ -29,7 +29,7 @@ struct SettingsView: View {
             } header: {
                 Text("Unlock")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.")
+                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.")
                     .foregroundStyle(.secondary)
             }
 
@@ -39,13 +39,11 @@ struct SettingsView: View {
                     Spacer()
                     ShortcutRecorder(shortcut: lockBinding, allowsClear: true)
                         .frame(width: 170, height: 24)
-                    Button("Clear") { settings.lockShortcut = nil }
-                        .disabled(settings.lockShortcut == nil)
                 }
             } header: {
                 Text("Lock Shortcut")
             } footer: {
-                Text("Optional. A system-wide hotkey that locks input from anywhere. If it matches Unlock, Frost clears it.")
+                Text("Optional. A system-wide hotkey that locks input from anywhere. Click the field and press a combo to set it; press ⌫ to clear or ⎋ to cancel. If it matches Unlock, Frost clears it.")
                     .foregroundStyle(.secondary)
             }
 

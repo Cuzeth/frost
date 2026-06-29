@@ -42,6 +42,8 @@ struct Shortcut: Codable, Equatable {
             && modifiers.intersection(Self.relevantModifiers) == modifierFlags
     }
 
+    /// Match against an `NSEvent` (the lock-hotkey dialect). Kept as part of the
+    /// three-dialect matching surface and exercised by `ShortcutTests`.
     func matches(nsEvent event: NSEvent) -> Bool {
         matches(keyCode: event.keyCode, modifiers: event.modifierFlags)
     }
@@ -69,6 +71,19 @@ struct Shortcut: Codable, Equatable {
         if modifierFlags.contains(.command) { out += "⌘" }
         out += Self.keyName(for: keyCode)
         return out
+    }
+
+    /// VoiceOver-friendly spelling, e.g. "Control Option Command U". The glyph
+    /// `displayString` is announced poorly by VoiceOver, so accessibility labels
+    /// should use this spoken form instead.
+    var spokenString: String {
+        var parts: [String] = []
+        if modifierFlags.contains(.control) { parts.append("Control") }
+        if modifierFlags.contains(.option) { parts.append("Option") }
+        if modifierFlags.contains(.shift) { parts.append("Shift") }
+        if modifierFlags.contains(.command) { parts.append("Command") }
+        parts.append(Self.keyName(for: keyCode))
+        return parts.joined(separator: " ")
     }
 
     static func keyName(for keyCode: UInt16) -> String {

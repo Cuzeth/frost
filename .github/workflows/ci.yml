@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Frost is authored with very new Xcode tooling (objectVersion 77,
+      # SWIFT_DEFAULT_ACTOR_ISOLATION, the macOS 26 SDK). Select the newest Xcode
+      # the runner provides. If the hosted image is older than the project
+      # requires, bump the runner image (e.g. a beta `macos-*` label) or pin a
+      # specific Xcode path here.
+      - name: Select newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -n1)/Contents/Developer"
+          xcodebuild -version
+
+      # Build the app and run the frostTests unit suite. Code signing is disabled
+      # because CI only needs to compile and run logic tests — it does not
+      # produce a distributable, signed, notarized artifact (that stays local;
+      # see RELEASING.md).
+      - name: Build & test (no code signing)
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project frost.xcodeproj \
+            -scheme frost \
+            -destination 'platform=macOS' \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults
+          path: TestResults.xcresult
+          if-no-files-found: ignore
