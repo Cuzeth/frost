@@ -333,6 +333,10 @@ Important project settings:
 - `ENABLE_APP_SANDBOX = NO`
 - `ENABLE_HARDENED_RUNTIME = YES`
 - `INFOPLIST_KEY_LSUIElement = YES`
+- Bundle id is configuration-specific so a dev build can coexist with an
+  installed copy without fighting over the same Accessibility (TCC) grant:
+  Debug builds use `dev.abdeen.frost.debug` and display as "Frost (Dev)";
+  Release keeps `dev.abdeen.frost` / "Frost". Grant Accessibility to each once.
 - Sparkle is resolved through Swift Package Manager.
 - `PrivacyInfo.xcprivacy` is bundled from the synchronized `frost` folder.
 
