@@ -469,31 +469,89 @@ private struct EmbeddedAuthenticationView: NSViewRepresentable {
         view.setContentHuggingPriority(.required, for: .vertical)
         view.setContentCompressionResistancePriority(.required, for: .horizontal)
         view.setContentCompressionResistancePriority(.required, for: .vertical)
-        // Start evaluation only once the view has actually joined the window (see
-        // EmbeddedAuthView). Firing from makeNSView was too early on first
-        // presentation: the prompt had nowhere to render, so the first Touch ID
-        // attempt silently no-opped and you had to Esc-cancel and retry.
-        view.onAttachedToWindow = { onReady(authenticationContext) }
+        // Start evaluation only once the view has joined the window AND that
+        // window is key (see EmbeddedAuthView). Firing from makeNSView was too
+        // early on first presentation: the prompt had nowhere to render. Firing
+        // on mere attachment was still too early — the embedded sensor only arms
+        // while the window is key, and Frost (an LSUIElement agent) keys the
+        // window asynchronously, so the first attempt no-opped and you had to
+        // Esc-cancel and retry.
+        view.onReadyToEvaluate = { onReady(authenticationContext) }
         return view
     }
 
     func updateNSView(_ view: EmbeddedAuthView, context: Context) {}
 }
 
-/// `LAAuthenticationView` that reports when it has joined a window, so the caller
-/// can defer `evaluatePolicy` until the embedded UI can actually render. The
-/// deferred hop also lets the first layout pass settle before evaluation starts.
+/// `LAAuthenticationView` that reports when it is ready to evaluate — i.e. it has
+/// joined a window AND that window is key. The embedded Touch ID sensor only arms
+/// while its window is key; calling `evaluatePolicy` against a non-key window
+/// silently shows no prompt (the bug behind "unlock, Esc, unlock again"). Frost
+/// is an LSUIElement agent, so `NSApp.activate` + `makeKeyAndOrderFront` make the
+/// window key only a few run-loop cycles later — after the attach callback. So we
+/// wait for `didBecomeKeyNotification` (or fire immediately if the window is
+/// already key) before evaluating. A fallback timer evaluates anyway if key
+/// status never arrives, preserving the Esc-cancel escape hatch rather than
+/// stranding the user. The notify hop also lets the first layout pass settle.
 private final class EmbeddedAuthView: LAAuthenticationView {
-    var onAttachedToWindow: (() -> Void)?
+    var onReadyToEvaluate: (() -> Void)?
     private var didNotify = false
+    private var keyObserver: (any NSObjectProtocol)?
+    private var fallback: DispatchWorkItem?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        guard window != nil, !didNotify else { return }
+        guard let window else {
+            // Detached before we fired; drop any pending waiters.
+            teardownWaiters()
+            return
+        }
+        guard !didNotify else { return }
+
+        if window.isKeyWindow {
+            notifyReady()
+            return
+        }
+
+        // Arm evaluation the instant the window becomes key.
+        keyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            self?.notifyReady()
+        }
+
+        // Safety net: if key status never arrives, evaluate anyway so the user
+        // can still Esc-cancel and retry instead of facing a dead prompt. This is
+        // strictly no worse than the pre-fix behavior.
+        let work = DispatchWorkItem { [weak self] in self?.notifyReady() }
+        fallback = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2, execute: work)
+    }
+
+    private func notifyReady() {
+        guard !didNotify, window != nil else { return }
         didNotify = true
+        teardownWaiters()
+        // One more hop so the first layout pass settles before evaluation.
         DispatchQueue.main.async { [weak self] in
             guard self?.window != nil else { return }
-            self?.onAttachedToWindow?()
+            self?.onReadyToEvaluate?()
         }
+    }
+
+    private func teardownWaiters() {
+        if let keyObserver {
+            NotificationCenter.default.removeObserver(keyObserver)
+            self.keyObserver = nil
+        }
+        fallback?.cancel()
+        fallback = nil
+    }
+
+    deinit {
+        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
+        fallback?.cancel()
     }
 }
