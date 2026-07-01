@@ -352,9 +352,12 @@ final class LockControllerTests {
         defer { controller.tearDownForTermination() }
 
         controller.lock()
-        tap.onUnlockChord?()   // hops to the main actor on the next tick
-        for _ in 0..<50 where controller.state != .authenticating {
-            await Task.yield()
+        tap.onUnlockChord?()   // hops to the main actor via a spawned Task
+        // Bare Task.yield() can starve that task on a loaded CI host; sleep
+        // gives the main actor real suspension windows. Bounded at ~2s —
+        // normally the first iteration is enough.
+        for _ in 0..<200 where controller.state != .authenticating {
+            try? await Task.sleep(for: .milliseconds(10))
         }
         #expect(controller.state == .authenticating)
         await controller.authenticationTask?.value
