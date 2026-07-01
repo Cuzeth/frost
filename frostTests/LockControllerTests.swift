@@ -353,14 +353,16 @@ final class LockControllerTests {
 
         controller.lock()
         tap.onUnlockChord?()   // hops to the main actor via a spawned Task
-        // Bare Task.yield() can starve that task on a loaded CI host; sleep
-        // gives the main actor real suspension windows. Bounded at ~2s —
-        // normally the first iteration is enough.
-        for _ in 0..<200 where controller.state != .authenticating {
+        // Don't assert the transient .authenticating state: the fake unlocker
+        // succeeds instantly, so chord → arm → success → unlocked can all
+        // happen inside one sleep and the window is unobservable under load.
+        // Wait (bounded ~2s) for the terminal state and prove the chord drove
+        // the flow through the unlocker.
+        for _ in 0..<200 where controller.state != .unlocked {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        #expect(controller.state == .authenticating)
-        await controller.authenticationTask?.value
+        #expect(controller.state == .unlocked)
+        #expect(unlocker.authenticateCount == 1)
     }
 
     // MARK: Tap revive failure — escalate, never a silent broken lock
