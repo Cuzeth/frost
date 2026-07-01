@@ -32,19 +32,20 @@ struct Shortcut: Codable, Equatable {
     /// Decoding must route through the normalizing init: `matches()` compares a
     /// normalized incoming mask against the stored flags, so a persisted value
     /// with an irrelevant bit (hand-edited or stale plist) would never match any
-    /// event — fatal when it's the unlock chord. Modifier-less values are
-    /// rejected for the same reason the recorder refuses them; callers fall
-    /// back to a safe default on decode failure.
+    /// event — fatal when it's the unlock chord. Bare and shift-only values are
+    /// rejected for the same reason the recorder refuses them (⇧F as a global
+    /// hotkey fires while typing); callers fall back to a safe default on
+    /// decode failure.
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let keyCode = try container.decode(UInt16.self, forKey: .keyCode)
         let rawFlags = try container.decode(UInt.self, forKey: .modifierFlagsRawValue)
         let flags = NSEvent.ModifierFlags(rawValue: rawFlags).intersection(Self.relevantModifiers)
-        guard !flags.isEmpty else {
+        guard !flags.subtracting(.shift).isEmpty else {
             throw DecodingError.dataCorruptedError(
                 forKey: .modifierFlagsRawValue,
                 in: container,
-                debugDescription: "Shortcut requires at least one of ⌃⌥⇧⌘"
+                debugDescription: "Shortcut requires at least one of ⌃⌥⌘"
             )
         }
         self.init(keyCode: keyCode, modifierFlags: flags)

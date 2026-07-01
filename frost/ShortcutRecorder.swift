@@ -4,9 +4,10 @@
 //
 //  A small click-to-record keyboard-shortcut field. SwiftUI has no native
 //  recorder, so this wraps a focus-capturing NSView: click it, press a combo,
-//  and it reports the captured Shortcut. A bare modifier-less key is rejected
-//  (every Frost shortcut needs at least one of ⌃⌥⇧⌘); Esc cancels recording and
-//  Delete clears (when clearing is allowed).
+//  and it reports the captured Shortcut. Every Frost shortcut needs at least
+//  one of ⌃⌥⌘ — a bare or shift-only key is rejected, because ⇧F as a global
+//  lock hotkey would fire while typing a capital F anywhere. Esc cancels
+//  recording and Delete clears (when clearing is allowed).
 //
 
 import AppKit
@@ -151,6 +152,13 @@ final class RecorderField: NSView {
                 NSSound.beep()
                 return true
             }
+        }
+
+        // Shift alone can't anchor a system-wide hotkey — it fires during
+        // ordinary typing. Keep waiting for a combo with at least one of ⌃⌥⌘.
+        guard !modifiers.subtracting(.shift).isEmpty else {
+            NSSound.beep()
+            return true
         }
 
         let captured = Shortcut(keyCode: event.keyCode, modifierFlags: modifiers)

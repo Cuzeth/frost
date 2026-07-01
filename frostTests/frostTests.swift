@@ -4,10 +4,13 @@
 //
 //  Top-level smoke checks for cross-cutting invariants. Detailed, per-type
 //  coverage lives in the dedicated suites:
-//    • ShortcutTests             — matching, display, Codable
-//    • InactivityLockOptionTests — thresholds, labels, case list
-//    • SettingsStoreTests        — UserDefaults persistence & reconciliation
-//    • LockStateTests            — state-machine value semantics
+//    • ShortcutTests              — matching, display, Codable
+//    • InactivityLockOptionTests  — thresholds, labels, case list
+//    • InactivityLockMonitorTests — auto-lock timing & baselines
+//    • SettingsStoreTests         — UserDefaults persistence & reconciliation
+//    • LockStateTests             — state-machine value semantics
+//    • EventTapManagerTests       — tap-callback decisions (chord, Esc, swallow)
+//    • UnlockCoordinatorTests     — LAError → AuthenticationResult mapping
 //
 
 import Testing

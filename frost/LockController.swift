@@ -191,19 +191,24 @@ final class LockController: ObservableObject {
 
     /// Catch SIGTERM (e.g. from `pkill`/`kill` over SSH) so we can restore the
     /// cursor + release the tap before exiting — never die with the cursor still
-    /// decoupled from the mouse.
+    /// decoupled from the mouse. SIGINT and SIGHUP get the same treatment: the
+    /// documented "terminal opened before locking" escape route can also deliver
+    /// Ctrl-C or a hangup on session close, whose default action would kill the
+    /// process without any teardown.
     private func installTerminationHandler() {
-        signal(SIGTERM, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        source.setEventHandler {
-            Task { @MainActor in LockController.shared?.handleTerminationSignal() }
+        for sig in [SIGTERM, SIGINT, SIGHUP] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler {
+                Task { @MainActor in LockController.shared?.handleTerminationSignal() }
+            }
+            source.resume()
+            signalSources.append(source)
         }
-        source.resume()
-        signalSources.append(source)
     }
 
     private func handleTerminationSignal() {
-        log.notice("SIGTERM received; tearing down before exit")
+        log.notice("Termination signal received; tearing down before exit")
         teardown()
         NSApp.terminate(nil)
     }

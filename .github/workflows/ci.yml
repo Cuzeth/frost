@@ -57,6 +57,24 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM=""
 
+      # Also compile the Release configuration: the safety-critical auto-unlock
+      # timer lives behind #if DEBUG, so Release-only breakage around that
+      # boundary is invisible to a Debug-only test run.
+      - name: Build Release configuration (no code signing)
+        run: |
+          set -euxo pipefail
+
+          xcodebuild build \
+            -project frost.xcodeproj \
+            -scheme frost \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM=""
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

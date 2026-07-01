@@ -103,7 +103,13 @@ final class EventTapManager {
             return false
         }
 
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0)
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, port, 0) else {
+            // Fails safe: no source means no suppression, so report failure and
+            // let the caller show recovery rather than crash at lock start.
+            log.fault("CFMachPortCreateRunLoopSource returned nil")
+            CFMachPortInvalidate(port)
+            return false
+        }
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: port, enable: true)
         guard CGEvent.tapIsEnabled(tap: port) else {
@@ -166,8 +172,10 @@ final class EventTapManager {
 
     // MARK: - Callback handling (main actor)
 
-    /// Returns `true` if the event should be swallowed.
-    fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
+    /// Returns `true` if the event should be swallowed. Internal (not
+    /// fileprivate) so the decision logic — the code whose failure either traps
+    /// the user or leaks input — is directly testable with synthetic CGEvents.
+    func handle(type: CGEventType, event: CGEvent) -> Bool {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if shouldSuppress, let tap {
@@ -201,7 +209,16 @@ final class EventTapManager {
             if passEscapeToSystem, isEscape(event) { return false }
             return true
         default:
-            if isPointerEvent(type) { pinCursor() }
+            // The cursor is disassociated for the whole session, so the sprite
+            // normally can't move and the event's own location (free to read)
+            // stays at the pinned point. Re-pin — two synchronous WindowServer
+            // calls — only when the location shows it actually drifted, instead
+            // of on every pointer event at up-to-1000 Hz polling rates.
+            if isPointerEvent(type),
+               let lockedCursorPosition,
+               event.location != lockedCursorPosition {
+                pinCursor()
+            }
             return true
         }
     }

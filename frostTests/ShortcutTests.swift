@@ -220,4 +220,15 @@ struct ShortcutTests {
             _ = try JSONDecoder().decode(Shortcut.self, from: json)
         }
     }
+
+    @Test func decodingRejectsShiftOnlyShortcut() {
+        // Same rule as the recorder: shift alone can't anchor a global hotkey
+        // (⇧F would fire while typing a capital F), so a persisted shift-only
+        // value must not survive decoding.
+        let raw = NSEvent.ModifierFlags([.shift]).rawValue
+        let json = Data(#"{"keyCode": \#(kVK_ANSI_F), "modifierFlagsRawValue": \#(raw)}"#.utf8)
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(Shortcut.self, from: json)
+        }
+    }
 }

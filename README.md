@@ -109,9 +109,11 @@ that was opened before locking can also send the signal.
 There is intentionally no in-repo kill script. The `SIGTERM` handler is the
 recovery contract.
 
-`SIGTERM` is the supported remote-kill path. A forced kill such as `kill -9` or
-a process crash skips Frost's teardown and relies on macOS to reclaim the event
-tap and cursor association.
+`SIGTERM` is the supported remote-kill path. `SIGINT` and `SIGHUP` get the same
+clean teardown, covering Ctrl-C or a closed session in a terminal that was
+opened before locking. A forced kill such as `kill -9` or a process crash skips
+Frost's teardown and relies on macOS to reclaim the event tap and cursor
+association.
 
 ### Debug Auto-Unlock
 
@@ -206,7 +208,9 @@ settings window.
 - `.defaultTap`
 
 Returning `nil` from the callback swallows input. The callback recognizes the
-unlock shortcut before swallowing the key event.
+unlock shortcut before swallowing the key event. The tap mask also includes
+macOS system-defined events, so media keys (volume, brightness, play/pause,
+eject) are suppressed while locked.
 
 Frost deliberately does not use `CGEventTapLocation.cghidEventTap`: Apple's SDK
 requires root for that earlier tap location, and Frost runs as the logged-in

@@ -20,6 +20,9 @@ final class InactivityLockMonitor {
     private var baselineDate: Date?
     private var observedInactivityLock: InactivityLockOption?
     private let failedLockSnoozeSeconds: TimeInterval = 60
+    /// Directly bounds auto-lock latency: a threshold can overshoot by up to
+    /// one poll interval.
+    private let pollIntervalSeconds: TimeInterval = 5
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Inactivity")
     private let now: () -> Date
     private let idleSeconds: () -> TimeInterval
@@ -76,8 +79,9 @@ final class InactivityLockMonitor {
         }
 
         pollTask = Task { @MainActor [weak self] in
+            let interval = self?.pollIntervalSeconds ?? 5
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(interval))
                 if Task.isCancelled { return }
                 self?.poll()
             }
@@ -106,15 +110,19 @@ final class InactivityLockMonitor {
         guard let settings,
               let isLocked,
               let lockAction,
-              !isLocked(),
-              let threshold = settings.inactivityLock.seconds
+              !isLocked()
         else { return }
 
+        // Track option changes BEFORE the threshold guard, so Off is observed
+        // too — otherwise toggling X → Off → X keeps a stale baseline and the
+        // "changing settings never immediately re-locks" contract breaks.
         if settings.inactivityLock != observedInactivityLock {
             observedInactivityLock = settings.inactivityLock
             resetIdleBaseline()
             return
         }
+
+        guard let threshold = settings.inactivityLock.seconds else { return }
 
         if let snoozedUntil {
             guard now() >= snoozedUntil else { return }
