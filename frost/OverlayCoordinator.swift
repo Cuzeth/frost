@@ -20,8 +20,18 @@ import AppKit
 import os
 import SwiftUI
 
+/// LockController's seam onto the overlay windows, so the lock state machine
+/// can be tested without creating real NSWindows on every display.
 @MainActor
-final class OverlayCoordinator: NSObject {
+protocol OverlayPresenting: AnyObject {
+    func present(controller: LockController, level: NSWindow.Level)
+    func focusAuthenticationWindow()
+    func dismiss()
+    func rebuildIfDeferred()
+}
+
+@MainActor
+final class OverlayCoordinator: NSObject, OverlayPresenting {
     private var windows: [NSWindow] = []
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Overlay")
     /// Index into `windows` of the active-display window: it becomes key so the

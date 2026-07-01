@@ -16,8 +16,16 @@ import Foundation
 import IOKit.pwr_mgt
 import os
 
+/// LockController's seam onto IOKit power assertions, so the lock state machine
+/// can be tested without holding real assertions on the test machine.
 @MainActor
-final class SleepAssertionManager {
+protocol SleepAsserting: AnyObject {
+    func apply(preventScreenSaver: Bool, preventSleep: Bool)
+    func releaseAll()
+}
+
+@MainActor
+final class SleepAssertionManager: SleepAsserting {
     private var displayAssertion: IOPMAssertionID = 0
     private var systemAssertion: IOPMAssertionID = 0
     private var holdingDisplay = false

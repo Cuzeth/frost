@@ -31,8 +31,21 @@ private let kEscapeKeyCode: Int64 = 0x35
 // straight through while locked. CGEventType has no Swift case for it.
 private let kSystemDefinedEventType: UInt32 = 14
 
+/// LockController's seam onto the event tap, so the lock state machine can be
+/// tested without creating a real (Accessibility-gated) CGEvent tap.
 @MainActor
-final class EventTapManager {
+protocol InputSuppressing: AnyObject {
+    var onUnlockChord: (() -> Void)? { get set }
+    var onTapReenabled: ((String) -> Void)? { get set }
+    var onTapReviveFailed: (() -> Void)? { get set }
+    var unlockShortcut: Shortcut? { get set }
+    func start() -> Bool
+    func setAuthenticating(_ on: Bool)
+    func stop()
+}
+
+@MainActor
+final class EventTapManager: InputSuppressing {
     /// Invoked on the main actor when the unlock shortcut is pressed.
     var onUnlockChord: (() -> Void)?
     /// Invoked if macOS disables the tap and Frost re-enables it.

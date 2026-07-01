@@ -15,6 +15,7 @@
 
 import AppKit
 import Combine
+import CoreGraphics
 import Foundation
 import os
 
@@ -40,13 +41,18 @@ final class LockController: ObservableObject {
     @Published private(set) var debugSecondsRemaining: Int?
     #endif
 
-    private let permissions = PermissionManager()
-    private let tap = EventTapManager()
-    private let overlay = OverlayCoordinator()
-    private let unlocker = UnlockCoordinator()
-    private let sleep = SleepAssertionManager()
-    private let inactivity = InactivityLockMonitor()
+    private let permissions: any AccessibilityChecking
+    private let tap: any InputSuppressing
+    private let overlay: any OverlayPresenting
+    private let unlocker: any UnlockAuthenticating
+    private let sleep: any SleepAsserting
+    private let inactivity: any InactivityMonitoring
+    private let kiosk: any KioskModeControlling
     private let settings: SettingsStore
+    /// False in unit tests: skips the process-level hooks (signal handlers, the
+    /// global NSEvent monitor, the distributed Accessibility observer) that
+    /// would otherwise leak out of the test into the host process.
+    private let managesSystemHooks: Bool
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Lock")
     private var accessibilityTrustedAtLaunch = false
     private var accessibilityRequiresRelaunch = false
@@ -60,7 +66,8 @@ final class LockController: ObservableObject {
     /// Observer for Accessibility-trust changes, so the optional lock hotkey
     /// monitor can be removed if trust disappears while Frost is running.
     private var accessibilityObserver: (any NSObjectProtocol)?
-    private var authenticationTask: Task<Void, Never>?
+    /// Internal get so state-machine tests can await the in-flight evaluation.
+    private(set) var authenticationTask: Task<Void, Never>?
 
     #if DEBUG
     /// DEBUG-only: the lock always tears down after this many seconds, no matter
@@ -80,39 +87,66 @@ final class LockController: ObservableObject {
     /// Command U".
     var unlockShortcutSpoken: String { settings.unlockShortcut.spokenString }
 
-    init(settings: SettingsStore) {
+    /// Collaborators default (nil) to the real implementations, constructed in
+    /// the body because default-argument expressions are nonisolated and the
+    /// real initializers are main-actor-isolated. Tests inject fakes and pass
+    /// `managesSystemHooks: false`.
+    init(
+        settings: SettingsStore,
+        permissions: (any AccessibilityChecking)? = nil,
+        tap: (any InputSuppressing)? = nil,
+        overlay: (any OverlayPresenting)? = nil,
+        unlocker: (any UnlockAuthenticating)? = nil,
+        sleep: (any SleepAsserting)? = nil,
+        inactivity: (any InactivityMonitoring)? = nil,
+        kiosk: (any KioskModeControlling)? = nil,
+        managesSystemHooks: Bool = true
+    ) {
         self.settings = settings
-        accessibilityTrustedAtLaunch = permissions.hasAccessibility()
-        Self.shared = self
-        tap.unlockShortcut = settings.unlockShortcut
+        self.permissions = permissions ?? PermissionManager()
+        self.tap = tap ?? EventTapManager()
+        self.overlay = overlay ?? OverlayCoordinator()
+        self.unlocker = unlocker ?? UnlockCoordinator()
+        self.sleep = sleep ?? SleepAssertionManager()
+        self.inactivity = inactivity ?? InactivityLockMonitor()
+        self.kiosk = kiosk ?? SystemKioskMode()
+        self.managesSystemHooks = managesSystemHooks
+        accessibilityTrustedAtLaunch = self.permissions.hasAccessibility()
+        self.tap.unlockShortcut = settings.unlockShortcut
         // Defer to the next main-loop tick so we never mutate the tap from
         // inside its own callback.
-        tap.onUnlockChord = { [weak self] in
+        self.tap.onUnlockChord = { [weak self] in
             Task { @MainActor in self?.requestUnlock() }
         }
-        tap.onTapReenabled = { [weak self] message in
+        self.tap.onTapReenabled = { [weak self] message in
             self?.tapRecoveryNotice = message
         }
-        tap.onTapReviveFailed = { [weak self] in
+        self.tap.onTapReviveFailed = { [weak self] in
             self?.handleTapReviveFailure()
         }
-        installTerminationHandler()
-        installLockHotKeyMonitor()
-        inactivity.start(settings: settings, lock: self)
+        if managesSystemHooks {
+            // Only the signal path reads Self.shared — a test-injected
+            // controller must not steal it from the app instance hosting the
+            // test run.
+            Self.shared = self
+            installTerminationHandler()
+            installLockHotKeyMonitor()
+        }
+        self.inactivity.start(settings: settings, lock: self)
     }
 
+    /// Only detaches the process-level hooks. Resource teardown (tap, cursor,
+    /// assertions, overlays) is owned by `teardown()` and the
+    /// `applicationWillTerminate` backstop: while locked, the presented overlay
+    /// retains this controller, so deinit can never run in a state that still
+    /// holds those resources — re-listing them here would be dead code that
+    /// reads like a safety net.
     deinit {
         MainActor.assumeIsolated {
             removeLockHotKeyMonitor()
             if let accessibilityObserver {
                 DistributedNotificationCenter.default().removeObserver(accessibilityObserver)
             }
-            inactivity.stop()
-            stopDebugAutoUnlock()
-            sleep.releaseAll()
-            tap.stop()
-            unlocker.cancel()
-            overlay.dismiss()
             signalSources.forEach { $0.cancel() }
             if Self.shared === self {
                 Self.shared = nil
@@ -144,6 +178,7 @@ final class LockController: ObservableObject {
     /// now. A new grant needs a Frost relaunch before the lock hotkey or event
     /// tap are considered usable.
     private func refreshLockHotKeyMonitor(reinstall: Bool = false) {
+        guard managesSystemHooks else { return }
         let currentlyTrusted = permissions.hasAccessibility()
         if !currentlyTrusted {
             accessibilityRequiresRelaunch = true
@@ -196,6 +231,9 @@ final class LockController: ObservableObject {
     /// Ctrl-C or a hangup on session close, whose default action would kill the
     /// process without any teardown.
     private func installTerminationHandler() {
+        // Deliberately NOT the main queue: the watchdog's whole point is to act
+        // when the main thread is wedged.
+        let watchdogQueue = DispatchQueue(label: "dev.abdeen.frost.termination-watchdog")
         for sig in [SIGTERM, SIGINT, SIGHUP] {
             signal(sig, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
@@ -204,6 +242,26 @@ final class LockController: ObservableObject {
             }
             source.resume()
             signalSources.append(source)
+
+            // Watchdog: the clean handler above runs on the main queue, and the
+            // signal's default action was replaced with SIG_IGN — so if the main
+            // thread ever wedges while locked, `pkill -x frost` would otherwise
+            // be silently ignored and the remote-kill contract would be dead.
+            // If the process is still alive this long after the signal, the
+            // clean path failed: restore the cursor association (best effort,
+            // callable off-main) and force-exit — macOS reclaims the tap and
+            // presentation options at process death. `_exit` skips atexit
+            // handlers, which could block on the wedged main thread.
+            let watchdog = DispatchSource.makeSignalSource(signal: sig, queue: watchdogQueue)
+            watchdog.setEventHandler { @Sendable in
+                Thread.sleep(forTimeInterval: 5)
+                CGAssociateMouseAndMouseCursorPosition(1)
+                Logger(subsystem: "dev.abdeen.frost", category: "Lock")
+                    .fault("Teardown did not finish after a termination signal; force-exiting")
+                _exit(EXIT_FAILURE)
+            }
+            watchdog.resume()
+            signalSources.append(watchdog)
         }
     }
 
@@ -269,8 +327,8 @@ final class LockController: ObservableObject {
             return
         }
 
-        overlay.present(controller: self)
-        enterKioskMode()
+        overlay.present(controller: self, level: .screenSaver)
+        kiosk.enterKioskMode()
         sleep.apply(preventScreenSaver: settings.preventScreenSaver,
                     preventSleep: settings.preventSleep)
         tapRecoveryNotice = nil
@@ -284,31 +342,6 @@ final class LockController: ObservableObject {
             armAuthentication()
         }
         log.info("Locked")
-    }
-
-    // Trackpad swipes for Mission Control / Spaces / App Exposé, ⌘-Tab, and the
-    // ⌘⌥Esc Force Quit panel are handled by the Dock / WindowServer above the
-    // HID layer, so the event tap can't swallow them. The only supported way to
-    // disable them is kiosk presentation options — and macOS REQUIRES the Dock
-    // and menu bar to be hidden for the disable* flags to be legal (an invalid
-    // combination raises an exception that would crash the lock). So blocking
-    // the gestures and hiding the Dock are one and the same switch; they cannot
-    // be separated. Force Quit is disabled because opening ⌘⌥Esc while the Touch
-    // ID prompt is up steals its focus and strands the user. ALWAYS undone in
-    // teardown so the desktop returns to normal.
-    private func enterKioskMode() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.presentationOptions = [
-            .hideDock,
-            .hideMenuBar,
-            .disableProcessSwitching,
-            .disableForceQuit,
-            .disableAppleMenu,
-        ]
-    }
-
-    private func exitKioskMode() {
-        NSApp.presentationOptions = []
     }
 
     // MARK: - Unlock
@@ -441,7 +474,7 @@ final class LockController: ObservableObject {
 
     private func teardown() {
         stopDebugAutoUnlock()
-        exitKioskMode()
+        kiosk.exitKioskMode()
         sleep.releaseAll()
         tap.stop()
         authenticationTask?.cancel()
@@ -493,5 +526,43 @@ final class LockController: ObservableObject {
         debugTask = nil
         debugSecondsRemaining = nil
         #endif
+    }
+}
+
+// MARK: - Kiosk presentation seam
+
+/// LockController's seam onto the NSApp presentation calls, so state-machine
+/// tests don't hide the real Dock and menu bar of the machine running them.
+@MainActor
+protocol KioskModeControlling: AnyObject {
+    func enterKioskMode()
+    func exitKioskMode()
+}
+
+// Trackpad swipes for Mission Control / Spaces / App Exposé, ⌘-Tab, and the
+// ⌘⌥Esc Force Quit panel are handled by the Dock / WindowServer above the
+// HID layer, so the event tap can't swallow them. The only supported way to
+// disable them is kiosk presentation options — and macOS REQUIRES the Dock
+// and menu bar to be hidden for the disable* flags to be legal (an invalid
+// combination raises an exception that would crash the lock). So blocking
+// the gestures and hiding the Dock are one and the same switch; they cannot
+// be separated. Force Quit is disabled because opening ⌘⌥Esc while the Touch
+// ID prompt is up steals its focus and strands the user. ALWAYS undone in
+// teardown so the desktop returns to normal.
+@MainActor
+final class SystemKioskMode: KioskModeControlling {
+    func enterKioskMode() {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.presentationOptions = [
+            .hideDock,
+            .hideMenuBar,
+            .disableProcessSwitching,
+            .disableForceQuit,
+            .disableAppleMenu,
+        ]
+    }
+
+    func exitKioskMode() {
+        NSApp.presentationOptions = []
     }
 }

@@ -9,8 +9,17 @@
 
 import ApplicationServices
 
+/// LockController's seam onto the Accessibility (TCC) check, so the lock state
+/// machine can be tested without depending on the test host's real trust state.
 @MainActor
-final class PermissionManager {
+protocol AccessibilityChecking: AnyObject {
+    func hasAccessibility() -> Bool
+    @discardableResult
+    func requestAccessibility() -> Bool
+}
+
+@MainActor
+final class PermissionManager: AccessibilityChecking {
     /// Accessibility trust without showing the system prompt.
     func hasAccessibility() -> Bool {
         checkAccessibility(prompt: false)

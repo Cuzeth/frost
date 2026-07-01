@@ -25,8 +25,17 @@ enum AuthenticationResult: Equatable {
     case unavailable(String)
 }
 
+/// LockController's seam onto LocalAuthentication, so the lock state machine
+/// can be tested without presenting real Touch ID prompts.
 @MainActor
-final class UnlockCoordinator {
+protocol UnlockAuthenticating: AnyObject {
+    func checkTouchIDAvailability() -> TouchIDCheck
+    func authenticate(reason: String) async -> AuthenticationResult
+    func cancel()
+}
+
+@MainActor
+final class UnlockCoordinator: UnlockAuthenticating {
     private var context: LAContext?
     private let policy: LAPolicy = .deviceOwnerAuthenticationWithBiometrics
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Unlock")

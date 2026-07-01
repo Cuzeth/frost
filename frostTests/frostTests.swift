@@ -9,6 +9,7 @@
 //    • InactivityLockMonitorTests — auto-lock timing & baselines
 //    • SettingsStoreTests         — UserDefaults persistence & reconciliation
 //    • LockStateTests             — state-machine value semantics
+//    • LockControllerTests        — lock/unlock/recovery transitions via fakes
 //    • EventTapManagerTests       — tap-callback decisions (chord, Esc, swallow)
 //    • UnlockCoordinatorTests     — LAError → AuthenticationResult mapping
 //

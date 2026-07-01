@@ -10,8 +10,18 @@ import CoreGraphics
 import Foundation
 import os
 
+/// LockController's seam onto the auto-lock monitor, so the lock state machine
+/// can be tested without a live polling task.
 @MainActor
-final class InactivityLockMonitor {
+protocol InactivityMonitoring: AnyObject {
+    func start(settings: SettingsStore, lock: LockController)
+    func stop()
+    func resetIdleBaseline()
+    func snoozeAfterFailedLock()
+}
+
+@MainActor
+final class InactivityLockMonitor: InactivityMonitoring {
     private weak var settings: SettingsStore?
     private var isLocked: (() -> Bool)?
     private var lockAction: (() -> Void)?
