@@ -17,7 +17,7 @@ jobs:
     name: Build & test
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Use the runner's default stable Xcode. Do not auto-select the "newest"
       # Xcode app because that can accidentally pick a release candidate.
@@ -77,7 +77,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: TestResults
           path: ${{ runner.temp }}/TestResults.xcresult
