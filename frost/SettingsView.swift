@@ -26,14 +26,15 @@ struct SettingsView: View {
                 HStack {
                     Text("Unlock")
                     Spacer()
-                    ShortcutRecorder(shortcut: unlockBinding, allowsClear: false)
+                    ShortcutRecorder(shortcut: unlockBinding, allowsClear: false,
+                                     accessibilityLabel: "Unlock shortcut")
                         .frame(width: 170, height: 24)
                 }
                 Toggle("Start Touch ID automatically when locked", isOn: $settings.startTouchIDWhenLocked)
             } header: {
                 Text("Unlock")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
+                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it, or ⎋ to cancel. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
                     .foregroundStyle(.secondary)
             }
 
@@ -41,7 +42,8 @@ struct SettingsView: View {
                 HStack {
                     Text("Lock")
                     Spacer()
-                    ShortcutRecorder(shortcut: lockBinding, allowsClear: true)
+                    ShortcutRecorder(shortcut: lockBinding, allowsClear: true,
+                                     accessibilityLabel: "Lock shortcut")
                         .frame(width: 170, height: 24)
                     Button("Clear") {
                         settings.lockShortcut = nil
@@ -72,7 +74,7 @@ struct SettingsView: View {
             } header: {
                 Text("Inactivity")
             } footer: {
-                Text("Locks after the selected time without keyboard, mouse, or trackpad input. Passive reading still counts as idle.")
+                Text("Locks after the selected time without keyboard, mouse, or trackpad input. Passive reading still counts as idle. With automatic Touch ID start on, an auto-lock also opens the Touch ID prompt; if nobody responds it times out back to the locked state.")
                     .foregroundStyle(.secondary)
             }
 
@@ -113,8 +115,15 @@ struct SettingsView: View {
             } header: {
                 Text("Menu Bar")
             } footer: {
-                Text("When off, the menu bar icon is hidden. Relaunch Frost to reopen this window; use Quit below to stop it.")
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    if !showInMenuBar && settings.lockShortcut == nil
+                        && settings.inactivityLock == .off {
+                        Text("With the icon hidden and no lock shortcut or auto-lock set, nothing can start a lock.")
+                            .foregroundStyle(.orange)
+                    }
+                    Text("When off, the menu bar icon is hidden. Relaunch Frost to reopen this window; use Quit below to stop it.")
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -123,7 +132,7 @@ struct SettingsView: View {
             } header: {
                 Text("Updates")
             } footer: {
-                Text("Frost checks automatically in the background. Use this to check right now.")
+                Text("Frost \(Self.appVersion) — checks automatically in the background. Use this to check right now.")
                     .foregroundStyle(.secondary)
             }
 
@@ -140,6 +149,13 @@ struct SettingsView: View {
             NSApp.activate(ignoringOtherApps: true)
             launchAtLogin.refresh()
         }
+    }
+
+    /// Marketing version for the Updates footer — a Sparkle-updated app should
+    /// say somewhere what version is running.
+    private static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString")
+            as? String ?? "—"
     }
 
     /// The unlock field is required, so adapt the non-optional store value to the

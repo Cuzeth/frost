@@ -14,7 +14,9 @@ import os
 
 enum TouchIDCheck: Equatable {
     case available
-    case unavailable(String)
+    /// `allowsRetry: false` when the failure is permanent (no sensor at all),
+    /// so recovery doesn't offer a "Try Again" that can never succeed.
+    case unavailable(message: String, allowsRetry: Bool)
 }
 
 /// Outcome of *evaluating* Touch ID.
@@ -49,9 +51,20 @@ final class UnlockCoordinator: UnlockAuthenticating {
         guard context.canEvaluatePolicy(policy, error: &error),
               context.biometryType == .touchID
         else {
-            return .unavailable(Self.touchIDUnavailableMessage(error, whileLocked: false))
+            return .unavailable(
+                message: Self.touchIDUnavailableMessage(error, whileLocked: false),
+                allowsRetry: !Self.isPermanentTouchIDAbsence(error)
+            )
         }
         return .available
+    }
+
+    /// `.biometryNotAvailable` means macOS reports no usable sensor at all —
+    /// retrying in place can never succeed. The other preflight failures
+    /// (enrollment, passcode, lockout) are fixable without relaunching Frost.
+    nonisolated private static func isPermanentTouchIDAbsence(_ error: NSError?) -> Bool {
+        guard let error, error.domain == LAError.errorDomain else { return false }
+        return LAError.Code(rawValue: error.code) == .biometryNotAvailable
     }
 
     /// Presents the standard system Touch ID prompt and evaluates it. A fresh

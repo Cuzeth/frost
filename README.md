@@ -128,8 +128,10 @@ If Frost cannot acquire the required permissions, cannot verify Touch ID, or
 cannot create an event tap, it does not lock input. Instead, it shows an
 **Input Not Locked** recovery overlay with guidance and, where retrying in place
 is useful, a retry button. When Accessibility is the issue, the overlay also
-includes a button to open Privacy settings and a quit button, because macOS may
-not make a fresh Accessibility grant usable until Frost is relaunched.
+includes a button to open Privacy settings and a **Quit & Reopen** button,
+because macOS may not make a fresh Accessibility grant usable until Frost is
+relaunched — and a quit-only path would leave an agent with no Dock icon and
+nothing visible to reopen.
 
 If macOS disables the event tap while Frost is already locked, Frost attempts to
 re-enable it immediately and shows a visible warning on the overlay. If the tap
@@ -187,8 +189,8 @@ while Frost is locked.
 Frost is an `LSUIElement` agent, so it has no Dock icon. The menu-bar item
 contains:
 
-- Lock Input
-- Locked (disabled while input is already locked)
+- Lock Input (reads Locked while input is suppressed, and Input Not Locked
+  while a recovery overlay is showing; disabled in both states)
 - Settings...
 - Check for Updates...
 - Quit Frost

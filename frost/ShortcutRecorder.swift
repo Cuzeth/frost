@@ -18,10 +18,14 @@ struct ShortcutRecorder: NSViewRepresentable {
     @Binding var shortcut: Shortcut?
     /// When false (the required unlock field) Delete won't clear the value.
     var allowsClear: Bool
+    /// Distinct VoiceOver label per recorder — a form with two fields that both
+    /// announce "Keyboard shortcut" is un-navigable by ear.
+    var accessibilityLabel = "Keyboard shortcut"
 
     func makeNSView(context: Context) -> RecorderField {
         let field = RecorderField()
         field.allowsClear = allowsClear
+        field.accessibilityLabelText = accessibilityLabel
         field.shortcut = shortcut
         field.onChange = { context.coordinator.commit($0) }
         return field
@@ -30,6 +34,7 @@ struct ShortcutRecorder: NSViewRepresentable {
     func updateNSView(_ field: RecorderField, context: Context) {
         context.coordinator.binding = $shortcut
         field.allowsClear = allowsClear
+        field.accessibilityLabelText = accessibilityLabel
         // Don't stomp on the value the user is mid-recording.
         if !field.isRecording { field.shortcut = shortcut }
     }
@@ -46,6 +51,7 @@ struct ShortcutRecorder: NSViewRepresentable {
 /// The focus-capturing control behind ShortcutRecorder.
 final class RecorderField: NSView {
     var allowsClear = false
+    var accessibilityLabelText = "Keyboard shortcut"
     var onChange: ((Shortcut?) -> Void)?
 
     var shortcut: Shortcut? {
@@ -87,10 +93,15 @@ final class RecorderField: NSView {
     // glyph label ("⌃⌥⌘U") is announced poorly.
     override func isAccessibilityElement() -> Bool { true }
     override func accessibilityRole() -> NSAccessibility.Role? { .button }
-    override func accessibilityLabel() -> String? { "Keyboard shortcut" }
+    override func accessibilityLabel() -> String? { accessibilityLabelText }
     override func accessibilityValue() -> Any? {
         if isRecording { return "Recording. Type a shortcut." }
         return shortcut?.spokenString ?? "Not set"
+    }
+    override func accessibilityHelp() -> String? {
+        allowsClear
+            ? "Press to record a shortcut. While recording, press Delete to clear or Escape to cancel."
+            : "Press to record a shortcut. While recording, press Escape to cancel."
     }
     override func accessibilityPerformPress() -> Bool {
         if isRecording {

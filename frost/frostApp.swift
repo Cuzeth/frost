@@ -43,7 +43,12 @@ struct frostApp: App {
         // LSUIElement agent: no Dock icon, no window — the menu bar is the UI.
         // `isInserted` lets the user hide the icon from Settings.
         MenuBarExtra("Frost", image: "MenuBarIcon", isInserted: $showInMenuBar) {
-            Button(lock.isLocked ? "Locked" : "Lock Input") {
+            // "Locked" only when input really is suppressed. During recovery
+            // input is explicitly NOT locked and the overlay says so — the menu
+            // must not contradict it.
+            Button(lock.isSuppressingInput
+                   ? "Locked"
+                   : (lock.isLocked ? "Input Not Locked" : "Lock Input")) {
                 lock.lock()
             }
             .disabled(lock.isLocked)

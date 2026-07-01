@@ -65,9 +65,13 @@ struct AuthenticationResultTests {
 
     @Test func touchIDCheckEquality() {
         #expect(TouchIDCheck.available == .available)
-        #expect(TouchIDCheck.unavailable("a") == .unavailable("a"))
-        #expect(TouchIDCheck.unavailable("a") != .unavailable("b"))
-        #expect(TouchIDCheck.available != .unavailable("a"))
+        #expect(TouchIDCheck.unavailable(message: "a", allowsRetry: true)
+                == .unavailable(message: "a", allowsRetry: true))
+        #expect(TouchIDCheck.unavailable(message: "a", allowsRetry: true)
+                != .unavailable(message: "b", allowsRetry: true))
+        #expect(TouchIDCheck.unavailable(message: "a", allowsRetry: true)
+                != .unavailable(message: "a", allowsRetry: false))
+        #expect(TouchIDCheck.available != .unavailable(message: "a", allowsRetry: true))
     }
 
     @Test func authenticationResultEquality() {

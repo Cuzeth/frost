@@ -368,7 +368,9 @@ struct LockOverlayView: View {
         HStack(spacing: 8) {
             statusPill(icon: "keyboard", text: "Input paused")
             statusPill(icon: "cursorarrow", text: "Pointer frozen")
-            statusPill(icon: "touchid", text: "Secured")
+            // "Touch ID", not "Secured": Frost is not a security product and
+            // must never present itself as one (AGENTS.md framing rule).
+            statusPill(icon: "touchid", text: "Touch ID")
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Input paused, pointer frozen.")
@@ -446,9 +448,11 @@ struct LockOverlayView: View {
             if recovery.showsAccessibilitySettings {
                 Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
                     .buttonStyle(.borderedProminent)
-                Button("Dismiss") { controller.dismissRecovery() }
+                    .keyboardShortcut(.defaultAction)
+                Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
                 Spacer(minLength: 0)
-                Button("Quit Frost") { controller.quitFrost() }
+                Button("Dismiss") { controller.dismissRecovery() }
+                    .keyboardShortcut(.cancelAction)
             } else {
                 if recovery.allowsRetry {
                     Button("Try Again") { controller.retryRecovery() }
@@ -456,6 +460,7 @@ struct LockOverlayView: View {
                         .keyboardShortcut(.defaultAction)
                 }
                 Button("Dismiss") { controller.dismissRecovery() }
+                    .keyboardShortcut(.cancelAction)
             }
         }
     }
@@ -465,8 +470,10 @@ struct LockOverlayView: View {
             if recovery.showsAccessibilitySettings {
                 Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
                     .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
                 Button("Dismiss") { controller.dismissRecovery() }
-                Button("Quit Frost") { controller.quitFrost() }
+                    .keyboardShortcut(.cancelAction)
             } else {
                 if recovery.allowsRetry {
                     Button("Try Again") { controller.retryRecovery() }
@@ -474,6 +481,7 @@ struct LockOverlayView: View {
                         .keyboardShortcut(.defaultAction)
                 }
                 Button("Dismiss") { controller.dismissRecovery() }
+                    .keyboardShortcut(.cancelAction)
             }
         }
     }

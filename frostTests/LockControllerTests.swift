@@ -191,7 +191,7 @@ final class LockControllerTests {
     // MARK: Preflight failures — must never suppress input
 
     @Test func touchIDUnavailableEntersRecoveryWithoutStartingTap() {
-        unlocker.availability = .unavailable("no sensor")
+        unlocker.availability = .unavailable(message: "no sensor", allowsRetry: false)
         let controller = makeController()
 
         controller.lock()
@@ -202,6 +202,8 @@ final class LockControllerTests {
         }
         #expect(recovery.title == "Touch ID Required")
         #expect(recovery.message == "no sensor")
+        // Permanent absence must not offer a Try Again that can never succeed.
+        #expect(!recovery.allowsRetry)
         #expect(tap.startCount == 0)
         #expect(kiosk.enterCount == 0)
         #expect(inactivity.snoozeCount == 1)
@@ -300,6 +302,22 @@ final class LockControllerTests {
         #expect(overlay.rebuildIfDeferredCount == 1)      // deferred rebuild applied
     }
 
+    @Test func failedAuthenticationReLocksWithRetryHint() async {
+        unlocker.result = .failed
+        let controller = makeController()
+        defer { controller.tearDownForTermination() }
+
+        controller.lock()
+        controller.requestUnlock()
+        await controller.authenticationTask?.value
+
+        #expect(controller.state == .locked)
+        #expect(controller.tapRecoveryNotice?.contains("didn't match") == true)
+        #expect(controller.tapRecoveryNotice?.contains(
+            settings.unlockShortcut.displayString) == true)
+        #expect(tap.stopCount == 0)
+    }
+
     @Test func unavailableAuthenticationReLocksWithNotice() async {
         unlocker.result = .unavailable("locked out")
         let controller = makeController()
@@ -379,7 +397,7 @@ final class LockControllerTests {
     }
 
     @Test func dismissRecoveryReturnsToUnlocked() {
-        unlocker.availability = .unavailable("no sensor")
+        unlocker.availability = .unavailable(message: "no sensor", allowsRetry: false)
         let controller = makeController()
 
         controller.lock()

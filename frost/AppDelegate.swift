@@ -25,7 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        SettingsWindowController.shared.show()
+        // Never churn window focus while a lock is active: `show()` activates
+        // the app and keys the Settings window, which competes with the system
+        // Touch ID prompt — and a reopen can arrive mid-lock (e.g. `open -a
+        // Frost` from a remote shell, or Quit & Reopen racing a new lock).
+        if LockController.shared?.isLocked != true {
+            SettingsWindowController.shared.show()
+        }
         return true
     }
 

@@ -77,6 +77,10 @@ final class LockController: ObservableObject {
     #endif
 
     var isLocked: Bool { state != .unlocked }
+    /// True only while input is genuinely suppressed. Distinct from `isLocked`,
+    /// which includes recovery — where input is explicitly NOT locked and the
+    /// menu bar must not claim otherwise.
+    var isSuppressingInput: Bool { state == .locked || state == .authenticating }
     /// True while a Touch ID evaluation is live. The overlay reads this to avoid
     /// rebuilding (and thereby churning window focus) while the prompt is up.
     var isAuthenticating: Bool { state == .authenticating }
@@ -279,10 +283,11 @@ final class LockController: ObservableObject {
         switch unlocker.checkTouchIDAvailability() {
         case .available:
             break
-        case .unavailable(let message):
+        case .unavailable(let message, let allowsRetry):
             enterRecovery(RecoveryState(
                 title: "Touch ID Required",
-                message: message
+                message: message,
+                allowsRetry: allowsRetry
             ))
             return
         }
@@ -299,8 +304,8 @@ final class LockController: ObservableObject {
             enterRecovery(RecoveryState(
                 message: """
                 Frost needs Accessibility. Enable it for \
-                Frost in System Settings → Privacy & Security, then quit and \
-                reopen Frost before locking. \
+                Frost in System Settings → Privacy & Security, then choose \
+                Quit & Reopen so the new permission takes effect. \
                 Input is NOT locked.
                 """,
                 showsAccessibilitySettings: true,
@@ -320,8 +325,8 @@ final class LockController: ObservableObject {
             stopDebugAutoUnlock()
             enterRecovery(RecoveryState(
                 message: """
-                Couldn't create the input tap. Confirm Accessibility is enabled \
-                for Frost, then try again. Input is NOT locked.
+                Frost couldn't start blocking input. Confirm Accessibility is \
+                enabled for Frost, then try again. Input is NOT locked.
                 """
             ))
             return
@@ -388,7 +393,14 @@ final class LockController: ObservableObject {
                 self.finishUnlock()
             case .unavailable(let message):
                 self.reLock(notice: message)
-            case .cancelled, .failed:
+            case .failed:
+                // Three bad reads in one prompt. Confirm the failure wasn't a
+                // glitch — a silent flip back to "Input Locked" reads as one.
+                self.reLock(notice: """
+                    Touch ID didn't match. Press \
+                    \(self.settings.unlockShortcut.displayString) to try again.
+                    """)
+            case .cancelled:
                 // Return to the idle locked state; the shortcut re-opens Touch ID.
                 self.reLock()
             }
@@ -427,9 +439,9 @@ final class LockController: ObservableObject {
         teardown()
         enterRecovery(RecoveryState(
             message: """
-            macOS disabled Frost's input tap and it could not be re-enabled, so \
-            input has been unlocked. Press Try Again to re-lock, or Dismiss to \
-            stay unlocked.
+            macOS stopped Frost's input blocking and it could not be restored, \
+            so input has been unlocked. Press Try Again to re-lock, or Dismiss \
+            to stay unlocked.
             """
         ))
     }
@@ -463,11 +475,25 @@ final class LockController: ObservableObject {
         }
     }
 
-    func quitFrost() {
+    /// Quit and reopen in one action: a fresh Accessibility grant usually isn't
+    /// usable by the running process, and an LSUIElement agent leaves no visual
+    /// trace after quitting — the user shouldn't have to remember to find Frost
+    /// in Spotlight. Terminates only once the new instance has launched; if the
+    /// relaunch fails, Frost stays running rather than stranding the user with
+    /// nothing.
+    func quitAndReopenFrost() {
         if case .recovery = state {
             teardown()
         }
-        NSApp.terminate(nil)
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(
+            at: Bundle.main.bundleURL,
+            configuration: configuration
+        ) { _, error in
+            guard error == nil else { return }
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
     }
 
     // MARK: - Teardown
