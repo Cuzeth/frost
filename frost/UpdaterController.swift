@@ -19,6 +19,8 @@ import Sparkle
 @MainActor
 final class UpdaterController: ObservableObject {
     private let controller: SPUStandardUpdaterController
+    /// Sparkle holds its delegate weakly; keep it alive here.
+    private let delegate = FrostUpdaterDelegate()
 
     /// Mirrors `SPUUpdater.canCheckForUpdates` so the menu item can disable
     /// itself while an update session is already in flight.
@@ -29,7 +31,7 @@ final class UpdaterController: ObservableObject {
         // automatic background checks using the Info.plist configuration.
         controller = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: delegate,
             userDriverDelegate: nil
         )
 
@@ -41,5 +43,24 @@ final class UpdaterController: ObservableObject {
     /// Triggers a user-initiated update check (shows Sparkle's standard UI).
     func checkForUpdates() {
         controller.checkForUpdates(nil)
+    }
+}
+
+/// Defers Sparkle's checks while input is suppressed: an update alert appearing
+/// mid-lock would sit below the overlay and compete with the Touch ID prompt
+/// for key-window status. Sparkle retries deferred scheduled checks on its own;
+/// recovery (input NOT locked) is deliberately not gated. Sparkle invokes its
+/// delegate on the main thread.
+@MainActor
+private final class FrostUpdaterDelegate: NSObject, SPUUpdaterDelegate {
+    func updater(_ updater: SPUUpdater, mayPerform updateCheck: SPUUpdateCheck) throws {
+        if LockController.shared?.isSuppressingInput == true {
+            throw NSError(
+                domain: "dev.abdeen.frost",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "Frost is locked; update checks resume after unlock."]
+            )
+        }
     }
 }

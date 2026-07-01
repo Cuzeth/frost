@@ -293,10 +293,10 @@ https://updates.abdeen.dev/frost/appcast.xml
 Do not replace `SUPublicEDKey`. It is the public EdDSA key used to verify
 updates for existing installs.
 
-Sparkle also supports hardening keys such as `SURequireSignedFeed` and
-`SUVerifyUpdateBeforeExtraction`. Frost has not added those explicit keys yet;
-when added, they should be verified against Sparkle's current defaults and
-release pipeline rather than cargo-culted from an older plan.
+Frost sets `SUVerifyUpdateBeforeExtraction` so a downloaded update's EdDSA
+signature is verified before the archive is even unarchived. Sparkle's
+scheduled background checks are deferred while input is locked, so an update
+alert can never compete with the Touch ID prompt for focus.
 
 ### Privacy Manifest
 
@@ -361,11 +361,15 @@ The script expects an already exported, signed, notarized, and stapled
 
 The script:
 
-1. Reads the version from the exported app's `Info.plist`.
-2. Creates `dist/Frost-<version>.dmg`.
-3. Stages that DMG in a clean temporary appcast input directory.
-4. Runs Sparkle's `generate_appcast`.
-5. Writes `dist/appcast.xml`.
+1. Validates the app is notarized and stapled (`stapler validate`, `spctl`).
+2. Reads the version from the exported app's `Info.plist`.
+3. Verifies the Keychain's Sparkle signing key matches the app's
+   `SUPublicEDKey` — a regenerated key would otherwise silently break updates
+   for every existing install.
+4. Creates `dist/Frost-<version>.dmg`.
+5. Stages that DMG in a clean temporary appcast input directory.
+6. Runs Sparkle's `generate_appcast`.
+7. Writes `dist/appcast.xml`.
 
 Upload both files to:
 
@@ -394,7 +398,3 @@ repository.
 - Do not introduce root helpers, privileged daemons, or kernel extensions.
 - Do not overwrite Sparkle's `SUPublicEDKey`.
 - Do not describe Frost as a screen locker or security product.
-
-## Current Gaps
-
-- Sparkle hardening keys are not set explicitly yet.

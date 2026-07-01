@@ -29,7 +29,9 @@ is never uploaded to your domain. The download page doesn't change per release.
 3. **Sparkle EdDSA key** in your login Keychain. Confirm it matches the app:
    `generate_keys -p` must print `V8xkC2BQlZG91vsCTw7ACPjL1dbRlBKo+ftb9ymNbdM=`.
    If it prints anything else, **stop** — signing with the wrong key breaks
-   updates for every installed copy.
+   updates for every installed copy. (`publish.sh` also enforces this match
+   automatically before signing, along with `stapler validate` and a
+   Gatekeeper `spctl` assessment of the exported app.)
 4. **`gh auth login`**, and an **abdeen.dev checkout** with push access (the
    release script commits the appcast there; Vercel deploys on push).
 5. **Add `updates.abdeen.dev` as a domain** on the abdeen.dev Vercel project

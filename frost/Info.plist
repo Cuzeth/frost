@@ -6,5 +6,7 @@
 	<string>https://updates.abdeen.dev/frost/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>V8xkC2BQlZG91vsCTw7ACPjL1dbRlBKo+ftb9ymNbdM=</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>

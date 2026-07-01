@@ -41,6 +41,24 @@ if [ ! -d "$APP_PATH" ]; then
   exit 1
 fi
 
+# --- Verify the app is notarized + stapled ----------------------------------
+# The contract is an already-signed, notarized, stapled app. A mis-exported
+# build would otherwise ship and hit Gatekeeper on every user's machine.
+# SKIP_NOTARIZATION_CHECK=1 is for local dry runs only.
+if [ "${SKIP_NOTARIZATION_CHECK:-0}" != "1" ]; then
+  echo "Validating notarization/stapling of $APP_PATH..."
+  if ! xcrun stapler validate "$APP_PATH"; then
+    echo "error: $APP_PATH has no valid notarization staple." >&2
+    echo "Notarize + staple in Xcode first (Distribute -> Developer ID)." >&2
+    echo "Local dry run only: SKIP_NOTARIZATION_CHECK=1 scripts/publish.sh ..." >&2
+    exit 1
+  fi
+  if ! spctl --assess --type exec -v "$APP_PATH"; then
+    echo "error: Gatekeeper assessment failed for $APP_PATH." >&2
+    exit 1
+  fi
+fi
+
 # --- Locate Sparkle's generate_appcast -------------------------------------
 # The path under DerivedData contains a per-project hash, so discover it rather
 # than hardcoding. Search is scoped to this user's DerivedData only.
@@ -51,9 +69,11 @@ find_sparkle_bin() {
   fi
   local derived="$HOME/Library/Developer/Xcode/DerivedData"
   local hit
+  # Multiple frost-* DerivedData dirs can hold different Sparkle versions;
+  # prefer the most recently built one instead of whichever find lists first.
   hit="$(/usr/bin/find "$derived" -type f \
         -path "$derived/frost-*/SourcePackages/artifacts/sparkle/Sparkle/bin/generate_appcast" 2>/dev/null \
-        | head -n 1)"
+        -print0 | xargs -0 ls -t 2>/dev/null | head -n 1)"
   if [ -n "$hit" ]; then
     dirname "$hit"
     return 0
@@ -75,6 +95,29 @@ PLIST="$APP_PATH/Contents/Info.plist"
 SHORT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
 BUILD_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
 echo "Packaging Frost $SHORT_VERSION (build $BUILD_VERSION)"
+
+# --- Verify the Keychain signing key matches the app's public key -----------
+# generate_appcast signs with whatever EdDSA key the login Keychain holds. If
+# that key was ever regenerated, it would sign happily — and every existing
+# install would silently fail to verify updates against the SUPublicEDKey it
+# shipped with. Fail before signing anything.
+if [ -x "$SPARKLE_BIN/generate_keys" ]; then
+  KEYCHAIN_PUBLIC_KEY="$("$SPARKLE_BIN/generate_keys" -p)"
+  APP_PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$PLIST")"
+  if [ "$KEYCHAIN_PUBLIC_KEY" != "$APP_PUBLIC_KEY" ]; then
+    echo "error: the Keychain's Sparkle public key does not match the app's" >&2
+    echo "SUPublicEDKey:" >&2
+    echo "  Keychain: $KEYCHAIN_PUBLIC_KEY" >&2
+    echo "  App:      $APP_PUBLIC_KEY" >&2
+    echo "Signing with this key would break updates for every existing install." >&2
+    echo "Restore the original private key before publishing (see RELEASING.md)." >&2
+    exit 1
+  fi
+  echo "Sparkle signing key matches the app's SUPublicEDKey."
+else
+  echo "warning: generate_keys not found next to generate_appcast;" >&2
+  echo "skipping the signing-key match check." >&2
+fi
 
 # --- Build the DMG ----------------------------------------------------------
 mkdir -p "$DIST_DIR"
