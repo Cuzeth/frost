@@ -198,4 +198,26 @@ struct ShortcutTests {
         #expect(decoded == .defaultUnlock)
         #expect(decoded.displayString == Shortcut.defaultUnlock.displayString)
     }
+
+    @Test func decodingNormalizesStoredModifierFlags() throws {
+        // A stored value with irrelevant bits (e.g. capsLock, from a hand-edited
+        // or stale plist) must decode to a shortcut that can still match live
+        // events — matches() compares against a normalized mask.
+        let raw = NSEvent.ModifierFlags([.command, .capsLock]).rawValue
+        let json = Data(#"{"keyCode": \#(kVK_ANSI_K), "modifierFlagsRawValue": \#(raw)}"#.utf8)
+        let decoded = try JSONDecoder().decode(Shortcut.self, from: json)
+        #expect(decoded.modifierFlags == [.command])
+        #expect(decoded.matches(keyCode: UInt16(kVK_ANSI_K), modifiers: [.command]))
+    }
+
+    @Test func decodingRejectsModifierlessShortcut() {
+        // Only irrelevant bits set — normalization leaves no modifiers, which
+        // the recorder would never produce. Decode must fail so callers fall
+        // back to a safe default instead of installing a bare-key chord.
+        let raw = NSEvent.ModifierFlags([.capsLock]).rawValue
+        let json = Data(#"{"keyCode": \#(kVK_ANSI_K), "modifierFlagsRawValue": \#(raw)}"#.utf8)
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(Shortcut.self, from: json)
+        }
+    }
 }

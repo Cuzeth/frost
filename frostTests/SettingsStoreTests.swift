@@ -146,4 +146,22 @@ final class SettingsStoreTests {
         defaults.set(Data("not valid json".utf8), forKey: Key.lock)
         #expect(SettingsStore(defaults: defaults).lockShortcut == nil)
     }
+
+    @Test func storedUnlockShortcutWithIrrelevantFlagBitsIsNormalized() {
+        // Valid JSON whose flags carry a non-chord bit: decode must normalize
+        // it (via the custom Shortcut init) so the chord still matches events.
+        let raw = NSEvent.ModifierFlags([.command, .control, .capsLock]).rawValue
+        let json = Data(#"{"keyCode": \#(kVK_ANSI_U), "modifierFlagsRawValue": \#(raw)}"#.utf8)
+        defaults.set(json, forKey: Key.unlock)
+
+        let store = SettingsStore(defaults: defaults)
+        #expect(store.unlockShortcut
+                == Shortcut(keyCode: UInt16(kVK_ANSI_U), modifierFlags: [.command, .control]))
+    }
+
+    @Test func modifierlessStoredUnlockShortcutFallsBackToDefault() {
+        let json = Data(#"{"keyCode": \#(kVK_ANSI_K), "modifierFlagsRawValue": 0}"#.utf8)
+        defaults.set(json, forKey: Key.unlock)
+        #expect(SettingsStore(defaults: defaults).unlockShortcut == .defaultUnlock)
+    }
 }

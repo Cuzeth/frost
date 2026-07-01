@@ -401,7 +401,10 @@ final class LockController: ObservableObject {
     private func enterRecovery(_ recovery: RecoveryState) {
         inactivity.snoozeAfterFailedLock()
         state = .recovery(recovery)
-        overlay.present(controller: self)
+        // Input is NOT locked in recovery, so the overlay doesn't need to sit
+        // above everything — .floating keeps system dialogs (the Accessibility
+        // TCC prompt in particular) visible and clickable above it.
+        overlay.present(controller: self, level: .floating)
     }
 
     func retryRecovery() {

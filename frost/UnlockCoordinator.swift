@@ -118,6 +118,21 @@ final class UnlockCoordinator {
         whileLocked: Bool
     ) -> String {
         if whileLocked {
+            // Lockout is terminal while input is suppressed: it clears only via
+            // a typed password, which the tap makes impossible. "Try again"
+            // would be false hope — every retry fails instantly. Say so, and
+            // give the two exits that actually work.
+            if let error,
+               error.domain == LAError.errorDomain,
+               LAError.Code(rawValue: error.code) == .biometryLockout {
+                return """
+                    Touch ID is locked after too many failed attempts and \
+                    cannot recover while input is locked. From another device, \
+                    run `pkill -x frost` over SSH (Remote Login must already \
+                    be on), or press and hold the power button to shut down \
+                    this Mac.
+                    """
+            }
             return """
                 Touch ID is not available right now. Press the unlock shortcut \
                 to try again. If Touch ID remains unavailable, use Remote Login \

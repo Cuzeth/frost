@@ -391,5 +391,7 @@ repository.
 
 ## Current Gaps
 
-- There is no test target in the current project.
+- The `frostTests` target covers the value types and stores (shortcuts,
+  settings, inactivity options/monitor); the lock state machine and the event
+  tap callback are not yet under test.
 - Sparkle hardening keys are not set explicitly yet.

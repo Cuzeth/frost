@@ -26,6 +26,11 @@ import os
 // kVK_Escape — passed through during auth so the user can cancel the prompt.
 private let kEscapeKeyCode: Int64 = 0x35
 
+// NX_SYSDEFINED. Media/system keys (volume, brightness, play/pause, eject)
+// arrive as system-defined events, not keyDown, so without this bit they pass
+// straight through while locked. CGEventType has no Swift case for it.
+private let kSystemDefinedEventType: UInt32 = 14
+
 @MainActor
 final class EventTapManager {
     /// Invoked on the main actor when the unlock shortcut is pressed.
@@ -82,7 +87,8 @@ final class EventTapManager {
             (1 << CGEventType.leftMouseDragged.rawValue) |
             (1 << CGEventType.rightMouseDragged.rawValue) |
             (1 << CGEventType.otherMouseDragged.rawValue) |
-            (1 << CGEventType.scrollWheel.rawValue)
+            (1 << CGEventType.scrollWheel.rawValue) |
+            (1 << kSystemDefinedEventType)
         )
 
         guard let port = CGEvent.tapCreate(

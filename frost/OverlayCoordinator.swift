@@ -34,6 +34,13 @@ final class OverlayCoordinator: NSObject {
     /// live system Touch ID prompt, so the rebuild is deferred until Frost returns
     /// to the idle locked state (see `rebuildIfDeferred`).
     private var needsRebuildAfterAuth = false
+    /// Window level for the current presentation, remembered across rebuilds.
+    /// `.screenSaver` while input is genuinely locked. Recovery overlays (input
+    /// NOT locked) sit at `.floating` so system dialogs — above all the
+    /// Accessibility (TCC) consent prompt that a failed `lock()` may have just
+    /// triggered — appear above the overlay instead of being buried and
+    /// click-blocked beneath it.
+    private var level: NSWindow.Level = .screenSaver
 
     deinit {
         MainActor.assumeIsolated {
@@ -41,8 +48,9 @@ final class OverlayCoordinator: NSObject {
         }
     }
 
-    func present(controller: LockController) {
+    func present(controller: LockController, level: NSWindow.Level = .screenSaver) {
         self.controller = controller
+        self.level = level
         rebuild()
         NotificationCenter.default.removeObserver(
             self, name: NSApplication.didChangeScreenParametersNotification, object: nil)
@@ -155,7 +163,7 @@ final class OverlayCoordinator: NSObject {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
-        window.level = .screenSaver
+        window.level = level
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         window.ignoresMouseEvents = false   // recovery buttons must be clickable
         window.isReleasedWhenClosed = false

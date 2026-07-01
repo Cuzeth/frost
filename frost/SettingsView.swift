@@ -15,6 +15,10 @@ struct SettingsView: View {
     @ObservedObject var updater: UpdaterController
     // Shares the menu-bar flag with the App via UserDefaults (see SettingsStore).
     @AppStorage(SettingsStore.showInMenuBarKey) private var showInMenuBar = true
+    /// Inline notice shown when a lock/unlock shortcut collision changes the
+    /// lock shortcut — the beep alone is inaudible with sound muted, and the
+    /// field silently flipping to "Click to record" reads as data loss.
+    @State private var lockShortcutNotice: String?
 
     var body: some View {
         Form {
@@ -29,7 +33,7 @@ struct SettingsView: View {
             } header: {
                 Text("Unlock")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.")
+                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
                     .foregroundStyle(.secondary)
             }
 
@@ -39,14 +43,23 @@ struct SettingsView: View {
                     Spacer()
                     ShortcutRecorder(shortcut: lockBinding, allowsClear: true)
                         .frame(width: 170, height: 24)
-                    Button("Clear") { settings.lockShortcut = nil }
-                        .disabled(settings.lockShortcut == nil)
+                    Button("Clear") {
+                        settings.lockShortcut = nil
+                        lockShortcutNotice = nil
+                    }
+                    .disabled(settings.lockShortcut == nil)
                 }
             } header: {
                 Text("Lock Shortcut")
             } footer: {
-                Text("Optional. A system-wide hotkey that locks input from anywhere. Click the field and press a combo to set it; press ⌫ or Clear to remove it, or ⎋ to cancel. If it matches Unlock, Frost clears it.")
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let lockShortcutNotice {
+                        Text(lockShortcutNotice)
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Optional. A system-wide hotkey that locks input from anywhere. Click the field and press a combo to set it; press ⌫ or Clear to remove it, or ⎋ to cancel. If it matches Unlock, Frost clears it.")
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -139,6 +152,7 @@ struct SettingsView: View {
                     settings.unlockShortcut = new
                     if settings.lockShortcut == new {
                         settings.lockShortcut = nil
+                        lockShortcutNotice = "Lock shortcut removed — it matched the new unlock shortcut."
                     }
                 }
             }
@@ -151,10 +165,12 @@ struct SettingsView: View {
             set: {
                 guard $0 != settings.unlockShortcut else {
                     settings.lockShortcut = nil
+                    lockShortcutNotice = "Not saved — the lock shortcut can't match the unlock shortcut."
                     NSSound.beep()
                     return
                 }
                 settings.lockShortcut = $0
+                lockShortcutNotice = nil
             }
         )
     }
