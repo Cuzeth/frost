@@ -74,7 +74,7 @@ struct SettingsView: View {
             } header: {
                 Text("Inactivity")
             } footer: {
-                Text("Locks after the selected time without keyboard, mouse, or trackpad input. Passive reading still counts as idle. With automatic Touch ID start on, an auto-lock also opens the Touch ID prompt; if nobody responds it times out back to the locked state.")
+                Text("Locks after the selected time without keyboard, mouse, or trackpad input. Passive reading still counts as idle. With automatic Touch ID start on, an auto-lock also opens the Touch ID prompt; input stays locked until Touch ID succeeds.")
                     .foregroundStyle(.secondary)
             }
 
