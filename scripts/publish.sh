@@ -13,8 +13,10 @@
 #      signs the DMG with the EdDSA private key (read from the login Keychain)
 #      and writes appcast.xml.
 #
-# Then upload BOTH dist/Frost-<version>.dmg and dist/appcast.xml to:
-#   https://updates.abdeen.dev/frost/
+# Outputs land in dist/. Releases are normally cut via scripts/release.sh,
+# which uploads the DMG to GitHub Releases and publishes the appcast to the
+# update host (see RELEASING.md); standalone runs of this script are for
+# local dry runs.
 #
 # Usage:
 #   scripts/publish.sh [path/to/frost.app]

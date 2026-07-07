@@ -323,6 +323,8 @@ data types, and UserDefaults access for Frost's own settings.
 - `frost/ShortcutRecorder.swift`: AppKit-backed shortcut recorder control.
 - `frost/UpdaterController.swift`: Sparkle update wrapper.
 - `scripts/publish.sh`: DMG packaging and appcast generation.
+- `scripts/release.sh`: end-to-end release — DMG + appcast via publish.sh,
+  GitHub Release upload, appcast publish to the update host.
 
 ## Build From Source
 
@@ -350,32 +352,29 @@ It contains the safety invariants that must not regress.
 
 ## Release Packaging
 
-Releases are packaged with:
+Releases are cut with:
 
 ```sh
-scripts/publish.sh /path/to/frost.app
+scripts/release.sh /path/to/frost.app
 ```
 
-The script expects an already exported, signed, notarized, and stapled
-`frost.app`. It does not build, sign, notarize, or staple the app.
+from an already exported, signed, notarized, and stapled `frost.app`. See
+`RELEASING.md` for the full procedure, including one-time setup.
 
-The script:
+`release.sh`:
 
-1. Validates the app is notarized and stapled (`stapler validate`, `spctl`).
-2. Reads the version from the exported app's `Info.plist`.
-3. Verifies the Keychain's Sparkle signing key matches the app's
-   `SUPublicEDKey` — a regenerated key would otherwise silently break updates
-   for every existing install.
-4. Creates `dist/Frost-<version>.dmg`.
-5. Stages that DMG in a clean temporary appcast input directory.
-6. Runs Sparkle's `generate_appcast`.
-7. Writes `dist/appcast.xml`.
+1. Builds `dist/Frost-<version>.dmg` and the EdDSA-signed `dist/appcast.xml`
+   (via `scripts/publish.sh`).
+2. Creates the GitHub Release `v<version>` and uploads the DMG there.
+3. Commits the appcast to the abdeen.dev repo, which serves it at
+   `https://updates.abdeen.dev/frost/appcast.xml`.
 
-Upload both files to:
+The DMG lives on GitHub Releases; only the appcast lives on the update
+domain. The appcast's enclosure URL points at the GitHub asset.
 
-```text
-https://updates.abdeen.dev/frost/
-```
+`scripts/publish.sh` is the lower-level DMG/appcast builder that
+`release.sh` drives. Running it standalone is for dry runs and legacy
+flows, not the release procedure.
 
 Sparkle's private EdDSA key belongs in the developer's login Keychain, created
 by Sparkle's `generate_keys`. It must not be committed or written into this
