@@ -1,0 +1,10 @@
+# Keeps the SHA-pinned actions in .github/workflows/ current.
+# NOTE: Sparkle (the app's only library dependency) is managed by the Xcode
+# project, which Dependabot's swift ecosystem does not read — Sparkle updates
+# stay manual. Watch https://github.com/sparkle-project/Sparkle/releases.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
