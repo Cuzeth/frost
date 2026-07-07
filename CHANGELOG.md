@@ -17,6 +17,12 @@ them for someone deciding whether to install the update.
      "## [x.y.z] - YYYY-MM-DD" heading just below, so the entries fall under it;
      then repoint the [Unreleased] link and add a compare-link at the bottom. -->
 
+## [2.1.1] - 2026-07-07
+
+### Added
+
+- This changelog.
+
 ## [2.1] - 2026-07-07
 
 ### Added
@@ -107,7 +113,8 @@ Initial public release.
 - Pointer stays pinned while the screen is locked.
 - Sparkle-based automatic updates.
 
-[Unreleased]: https://github.com/Cuzeth/frost/compare/v2.1...HEAD
+[Unreleased]: https://github.com/Cuzeth/frost/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/Cuzeth/frost/compare/v2.1...v2.1.1
 [2.1]: https://github.com/Cuzeth/frost/compare/v2.0...v2.1
 [2.0]: https://github.com/Cuzeth/frost/compare/v1.4...v2.0
 [1.4]: https://github.com/Cuzeth/frost/compare/v1.3...v1.4
