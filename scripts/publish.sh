@@ -156,6 +156,7 @@ echo "Done."
 echo "  DMG:     $DMG_PATH"
 echo "  Appcast: $DIST_DIR/appcast.xml"
 echo
-echo "Next: upload BOTH files to ${DOWNLOAD_URL_PREFIX}"
+echo "Next: releases are normally cut with scripts/release.sh, which uploads the"
+echo "DMG to GitHub Releases and publishes the appcast (see RELEASING.md)."
 echo "(If generate_appcast reported a missing key, run Sparkle's generate_keys"
 echo " once — it stores the private key in your login Keychain.)"
