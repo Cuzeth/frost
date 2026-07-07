@@ -221,6 +221,10 @@ command line works:
 shortcuts run "Lock Input"
 ```
 
+Debug builds publish the action as "Lock Input (Dev)", mirroring the Frost
+(Dev) build split, so a development build never masquerades as the installed
+app in Shortcuts.
+
 There is deliberately no unlock automation and no `frost://` URL scheme: the
 intent can only start a lock, never end one.
 

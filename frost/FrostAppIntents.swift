@@ -17,7 +17,14 @@
 import AppIntents
 
 struct LockInputIntent: AppIntent {
+    // Mirror the Debug/Release bundle split (dev.abdeen.frost.debug /
+    // "Frost (Dev)") so a dev build's action is distinguishable from the
+    // installed app's in the Shortcuts gallery.
+    #if DEBUG
+    static let title: LocalizedStringResource = "Lock Input (Dev)"
+    #else
     static let title: LocalizedStringResource = "Lock Input"
+    #endif
     static let description = IntentDescription(
         "Locks keyboard, mouse, and trackpad input until unlocked with Touch ID."
     )
@@ -58,7 +65,11 @@ struct FrostShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: LockInputIntent(),
             phrases: ["Lock input with \(.applicationName)"],
+            #if DEBUG
+            shortTitle: "Lock Input (Dev)",
+            #else
             shortTitle: "Lock Input",
+            #endif
             systemImageName: "lock.fill"
         )
     }
