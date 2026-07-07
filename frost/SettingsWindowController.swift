@@ -47,7 +47,16 @@ final class SettingsWindowController {
 
         NSApp.activate(ignoringOtherApps: true)
         windowController?.showWindow(nil)
-        windowController?.window?.makeKeyAndOrderFront(nil)
+        guard let window = windowController?.window else { return }
+        window.makeKeyAndOrderFront(nil)
+        // Cooperative activation (macOS 14+) may decline to activate an
+        // LSUIElement agent; without this the window can open BEHIND the
+        // frontmost app.
+        window.orderFrontRegardless()
+        // Don't open with the caret captured by the settings form's text
+        // field (the form's only plain text input receives initial focus,
+        // and clicking empty form space never resigns it).
+        window.makeFirstResponder(nil)
     }
 
     private func makeWindowController(
