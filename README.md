@@ -199,6 +199,23 @@ If the menu-bar item is hidden in settings, Frost still needs a way back in.
 `AppDelegate` handles launch and reopen events and shows the explicit AppKit
 settings window.
 
+## Automation
+
+Frost exposes one Shortcuts action, **Lock Input**, through App Intents. It
+starts the same lock as the menu item — every preflight (Touch ID
+availability, Accessibility) and every recovery behavior applies unchanged —
+and is a no-op if Frost is already locked or showing the recovery overlay.
+
+From a terminal, after Frost has been launched once so macOS registers the
+action:
+
+```sh
+shortcuts run "Lock Input"
+```
+
+There is deliberately no unlock automation and no `frost://` URL scheme: the
+intent can only start a lock, never end one.
+
 ## How It Works
 
 ### Input Suppression
