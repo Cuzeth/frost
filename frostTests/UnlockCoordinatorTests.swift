@@ -23,26 +23,26 @@ struct UnlockCoordinatorTests {
 
     @Test func successWinsRegardlessOfError() {
         #expect(UnlockCoordinator.authenticationResult(
-            success: true, error: nil) == .success)
+            success: true, error: nil, allowsWatch: false) == .success)
         #expect(UnlockCoordinator.authenticationResult(
-            success: true, error: laError(.systemCancel)) == .success)
+            success: true, error: laError(.systemCancel), allowsWatch: false) == .success)
     }
 
     @Test func failureWithoutErrorIsFailed() {
         #expect(UnlockCoordinator.authenticationResult(
-            success: false, error: nil) == .failed)
+            success: false, error: nil, allowsWatch: false) == .failed)
     }
 
     @Test(arguments: [LAError.userCancel, .systemCancel, .appCancel])
     func cancellationCodesMapToCancelled(code: LAError.Code) {
         #expect(UnlockCoordinator.authenticationResult(
-            success: false, error: laError(code)) == .cancelled)
+            success: false, error: laError(code), allowsWatch: false) == .cancelled)
     }
 
     @Test(arguments: [LAError.authenticationFailed, .userFallback])
     func failureCodesMapToFailed(code: LAError.Code) {
         #expect(UnlockCoordinator.authenticationResult(
-            success: false, error: laError(code)) == .failed)
+            success: false, error: laError(code), allowsWatch: false) == .failed)
     }
 
     @Test(arguments: [
@@ -51,7 +51,7 @@ struct UnlockCoordinatorTests {
     ])
     func unavailabilityCodesMapToUnavailable(code: LAError.Code) {
         let result = UnlockCoordinator.authenticationResult(
-            success: false, error: laError(code))
+            success: false, error: laError(code), allowsWatch: false)
         guard case .unavailable = result else {
             Issue.record("\(code) mapped to \(result), expected .unavailable")
             return
@@ -62,7 +62,7 @@ struct UnlockCoordinatorTests {
     /// the exits that work and must not suggest retrying.
     @Test func lockoutMessageGivesWorkableExitsOnly() {
         let result = UnlockCoordinator.authenticationResult(
-            success: false, error: laError(.biometryLockout))
+            success: false, error: laError(.biometryLockout), allowsWatch: false)
         guard case .unavailable(let message) = result else {
             Issue.record("biometryLockout did not map to .unavailable")
             return
@@ -74,7 +74,7 @@ struct UnlockCoordinatorTests {
 
     @Test func transientUnavailabilityMessageOffersRetry() {
         let result = UnlockCoordinator.authenticationResult(
-            success: false, error: laError(.biometryNotAvailable))
+            success: false, error: laError(.biometryNotAvailable), allowsWatch: false)
         guard case .unavailable(let message) = result else {
             Issue.record("biometryNotAvailable did not map to .unavailable")
             return
@@ -85,12 +85,32 @@ struct UnlockCoordinatorTests {
     @Test func nonLAErrorDomainIsFailed() {
         let error = NSError(domain: "dev.abdeen.frost.tests", code: 1)
         #expect(UnlockCoordinator.authenticationResult(
-            success: false, error: error) == .failed)
+            success: false, error: error, allowsWatch: false) == .failed)
     }
 
     @Test func unknownLAErrorCodeIsFailed() {
         let error = NSError(domain: LAError.errorDomain, code: 9999)
         #expect(UnlockCoordinator.authenticationResult(
-            success: false, error: error) == .failed)
+            success: false, error: error, allowsWatch: false) == .failed)
+    }
+
+    // MARK: - Policy selection
+
+    /// The chosen `LAPolicy` must follow the injected `allowWatch` closure —
+    /// Touch ID only by default, Touch ID-or-Watch when the user opted in —
+    /// and must consult the closure on every read, not just at construction,
+    /// so a live setting change takes effect on the next lock/unlock.
+    @Test func policySelectionFollowsTheWatchSetting() {
+        let alwaysOff = UnlockCoordinator(allowWatch: { false })
+        #expect(alwaysOff.effectivePolicy == .deviceOwnerAuthenticationWithBiometrics)
+
+        let alwaysOn = UnlockCoordinator(allowWatch: { true })
+        #expect(alwaysOn.effectivePolicy == .deviceOwnerAuthenticationWithBiometricsOrWatch)
+
+        var flag = false
+        let dynamic = UnlockCoordinator(allowWatch: { flag })
+        #expect(dynamic.effectivePolicy == .deviceOwnerAuthenticationWithBiometrics)
+        flag = true
+        #expect(dynamic.effectivePolicy == .deviceOwnerAuthenticationWithBiometricsOrWatch)
     }
 }

@@ -24,7 +24,7 @@ screen contents stay visible.
 Frost is a focused macOS app in active development.
 
 - Platform: macOS 14.6+
-- Requires: a Mac with Touch ID configured
+- Requires: a Mac with Touch ID configured (or, optionally, a paired Apple Watch with Watch unlock enabled in Settings)
 - UI: SwiftUI plus AppKit
 - App type: `LSUIElement` menu-bar agent, with no Dock icon
 - Bundle ID: `dev.abdeen.frost`
@@ -174,6 +174,9 @@ Current settings:
   idle time, from 30 seconds up to 2 hours.
 - Start Touch ID automatically when locked: optional; opens the Touch ID prompt
   as soon as a lock begins instead of waiting for the unlock shortcut.
+- Allow Apple Watch to unlock: optional, off by default; also accepts a paired,
+  unlocked Apple Watch (double-press its side button when prompted) as an
+  unlock path alongside Touch ID.
 - Prevent screen saver: holds a display-sleep prevention assertion while locked.
 - Prevent sleep: holds an idle system-sleep prevention assertion while locked.
 - Launch at login: registers Frost as a main-app login item with `SMAppService`.
@@ -281,6 +284,10 @@ Before locking, Frost verifies that the Mac reports Touch ID through
 (with an empty `localizedFallbackTitle`, so no password button) is evaluated with
 `.deviceOwnerAuthenticationWithBiometrics`, presenting the standard system Touch
 ID prompt — Touch ID only, since keyboard input stays suppressed while locked.
+If "Allow Apple Watch to unlock" is enabled in Settings, Frost evaluates
+`.deviceOwnerAuthenticationWithBiometricsOrWatch` instead, so a paired,
+unlocked Watch can approve the unlock; the no-password rationale is
+unchanged — both paths are out-of-band from the suppressed keyboard.
 
 ### Power Assertions
 

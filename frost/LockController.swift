@@ -88,6 +88,8 @@ final class LockController: ObservableObject {
     /// VoiceOver-friendly spelling of the unlock shortcut, e.g. "Control Option
     /// Command U".
     var unlockShortcutSpoken: String { settings.unlockShortcut.spokenString }
+    /// Optional owner-supplied message shown on the locked overlay (empty = none).
+    var lockMessage: String { settings.lockMessage }
 
     /// Collaborators default (nil) to the real implementations, constructed in
     /// the body because default-argument expressions are nonisolated and the
@@ -109,7 +111,7 @@ final class LockController: ObservableObject {
         self.permissions = permissions ?? PermissionManager()
         self.tap = tap ?? EventTapManager()
         self.overlay = overlay ?? OverlayCoordinator()
-        self.unlocker = unlocker ?? UnlockCoordinator()
+        self.unlocker = unlocker ?? UnlockCoordinator(allowWatch: { settings.allowWatchUnlock })
         self.sleep = sleep ?? SleepAssertionManager()
         self.inactivity = inactivity ?? InactivityLockMonitor()
         self.kiosk = kiosk ?? SystemKioskMode()

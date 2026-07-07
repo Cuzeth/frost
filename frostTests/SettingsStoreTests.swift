@@ -26,6 +26,7 @@ final class SettingsStoreTests {
         static let startTouchID = "startTouchIDWhenLocked"
         static let preventScreenSaver = "preventScreenSaver"
         static let preventSleep = "preventSleep"
+        static let lockMessage = "lockMessage"
     }
 
     private let suiteName: String
@@ -90,6 +91,22 @@ final class SettingsStoreTests {
         #expect(reloaded.startTouchIDWhenLocked)
         #expect(reloaded.preventScreenSaver)
         #expect(reloaded.preventSleep)
+    }
+
+    @Test func lockMessagePersistsAcrossInstances() {
+        let store = SettingsStore(defaults: defaults)
+        #expect(store.lockMessage == "")
+
+        store.lockMessage = "Agent run in progress — do not touch"
+        #expect(SettingsStore(defaults: defaults).lockMessage == "Agent run in progress — do not touch")
+    }
+
+    @Test func allowWatchUnlockDefaultsFalseAndPersists() {
+        let store = SettingsStore(defaults: defaults)
+        #expect(store.allowWatchUnlock == false)
+
+        store.allowWatchUnlock = true
+        #expect(SettingsStore(defaults: defaults).allowWatchUnlock)
     }
 
     @Test func settingUnlockShortcutWritesImmediately() {

@@ -31,10 +31,11 @@ struct SettingsView: View {
                         .frame(width: 170, height: 24)
                 }
                 Toggle("Start Touch ID automatically when locked", isOn: $settings.startTouchIDWhenLocked)
+                Toggle("Allow Apple Watch to unlock", isOn: $settings.allowWatchUnlock)
             } header: {
                 Text("Unlock")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it, or ⎋ to cancel. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
+                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it, or ⎋ to cancel. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires Touch ID — or, if enabled, a paired, unlocked Apple Watch (double-press its side button when prompted).\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
                     .foregroundStyle(.secondary)
             }
 
@@ -74,7 +75,7 @@ struct SettingsView: View {
             } header: {
                 Text("Inactivity")
             } footer: {
-                Text("Locks after the selected time without keyboard, mouse, or trackpad input. Passive reading still counts as idle. With automatic Touch ID start on, an auto-lock also opens the Touch ID prompt; if nobody responds it times out back to the locked state.")
+                Text("Locks after the selected time without keyboard, mouse, or trackpad input. Passive reading still counts as idle. With automatic Touch ID start on, an auto-lock also opens the Touch ID prompt; input stays locked until Touch ID succeeds.")
                     .foregroundStyle(.secondary)
             }
 
@@ -85,6 +86,16 @@ struct SettingsView: View {
                 Text("While Locked")
             } footer: {
                 Text("Keep the screen on and the Mac awake while input is locked. Released automatically on unlock.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                TextField("Message", text: $settings.lockMessage,
+                          prompt: Text("Optional, e.g. \u{201C}Agent run in progress — do not touch\u{201D}"))
+            } header: {
+                Text("Overlay Message")
+            } footer: {
+                Text("Shown on the locked overlay while input is suppressed. Leave empty for none.")
                     .foregroundStyle(.secondary)
             }
 
