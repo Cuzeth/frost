@@ -16,6 +16,16 @@ import Testing
 @testable import frost
 
 @MainActor
+private final class FakeCursor: CursorControlling {
+    var location: CGPoint? = CGPoint(x: 100, y: 100)
+    private(set) var associations: [Bool] = []
+    private(set) var warps: [CGPoint] = []
+    func setAssociated(_ associated: Bool) { associations.append(associated) }
+    func warp(to point: CGPoint) { warps.append(point) }
+    func currentLocation() -> CGPoint? { location }
+}
+
+@MainActor
 struct EventTapManagerTests {
 
     private func keyEvent(
@@ -145,5 +155,72 @@ struct EventTapManagerTests {
             type: .tapDisabledByTimeout, event: try keyEvent(kVK_ANSI_A)))
         #expect(!manager.handle(
             type: .tapDisabledByUserInput, event: try keyEvent(kVK_ANSI_A)))
+    }
+
+    // MARK: - Cursor control
+
+    @Test func stopAlwaysRestoresCursorAssociation() {
+        // stop() must always re-couple the mouse and cursor, even if start()
+        // was never called — otherwise the pointer stays dead after unlock.
+        let fake = FakeCursor()
+        let manager = EventTapManager(cursor: fake)
+        manager.stop()
+        #expect(fake.associations.last == true)
+    }
+
+    @Test func stopWithoutStartDoesNotWarp() {
+        let fake = FakeCursor()
+        let manager = EventTapManager(cursor: fake)
+        manager.stop()
+        #expect(fake.warps.isEmpty)
+    }
+
+    // MARK: - Tap-disabled recovery decision
+
+    @Test func tapDisabledReactionCoversAllCombinations() {
+        #expect(EventTapManager.tapDisabledReaction(
+            type: .tapDisabledByTimeout,
+            shouldSuppress: false,
+            tapIsEnabledAfterReenable: true
+        ) == .ignore)
+
+        #expect(EventTapManager.tapDisabledReaction(
+            type: .tapDisabledByTimeout,
+            shouldSuppress: false,
+            tapIsEnabledAfterReenable: false
+        ) == .ignore)
+
+        #expect(EventTapManager.tapDisabledReaction(
+            type: .tapDisabledByUserInput,
+            shouldSuppress: true,
+            tapIsEnabledAfterReenable: false
+        ) == .reviveFailed)
+
+        #expect(EventTapManager.tapDisabledReaction(
+            type: .tapDisabledByTimeout,
+            shouldSuppress: true,
+            tapIsEnabledAfterReenable: true
+        ) == .reenabled(
+            message: "The input tap was disabled by macOS after it stopped responding, then re-enabled."
+        ))
+
+        #expect(EventTapManager.tapDisabledReaction(
+            type: .tapDisabledByUserInput,
+            shouldSuppress: true,
+            tapIsEnabledAfterReenable: true
+        ) == .reenabled(
+            message: "The input tap was disabled by macOS, then re-enabled."
+        ))
+    }
+
+    @Test func repinDoesNotFireWithoutALockedPosition() throws {
+        // A never-started manager has no lockedCursorPosition, so pointer
+        // events must never trigger a re-pin warp. The positive drift case
+        // (a real locked position that has drifted) needs a real start() and
+        // therefore stays a manual/integration check.
+        let fake = FakeCursor()
+        let manager = EventTapManager(cursor: fake)
+        #expect(manager.handle(type: .mouseMoved, event: try mouseEvent(.mouseMoved)))
+        #expect(fake.warps.isEmpty)
     }
 }

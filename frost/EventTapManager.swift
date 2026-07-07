@@ -44,6 +44,27 @@ protocol InputSuppressing: AnyObject {
     func stop()
 }
 
+/// EventTapManager's seam onto the WindowServer cursor calls, so tests can
+/// assert freeze/restore/re-pin behavior without decoupling the real mouse
+/// from the cursor of the machine running them.
+@MainActor
+protocol CursorControlling: AnyObject {
+    /// Couple (true) or decouple (false) the mouse and the on-screen cursor.
+    func setAssociated(_ associated: Bool)
+    func warp(to point: CGPoint)
+    /// The current cursor location, captured at lock time for pinning.
+    func currentLocation() -> CGPoint?
+}
+
+@MainActor
+final class SystemCursorControl: CursorControlling {
+    func setAssociated(_ associated: Bool) {
+        _ = CGAssociateMouseAndMouseCursorPosition(associated ? 1 : 0)
+    }
+    func warp(to point: CGPoint) { CGWarpMouseCursorPosition(point) }
+    func currentLocation() -> CGPoint? { CGEvent(source: nil)?.location }
+}
+
 @MainActor
 final class EventTapManager: InputSuppressing {
     /// Invoked on the main actor when the unlock shortcut is pressed.
@@ -71,8 +92,17 @@ final class EventTapManager: InputSuppressing {
     private var passEscapeToSystem = false
     private var lockedCursorPosition: CGPoint?
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "EventTap")
+    private let cursor: any CursorControlling
 
     private(set) var isRunning = false
+
+    /// `cursor` defaults (nil) to the real WindowServer-backed implementation,
+    /// constructed in the body because default-argument expressions are
+    /// nonisolated and the real initializer is main-actor-isolated. Tests
+    /// inject a fake.
+    init(cursor: (any CursorControlling)? = nil) {
+        self.cursor = cursor ?? SystemCursorControl()
+    }
 
     deinit {
         MainActor.assumeIsolated {
@@ -136,7 +166,7 @@ final class EventTapManager: InputSuppressing {
         runLoopSource = source
         shouldSuppress = true
         isRunning = true
-        lockedCursorPosition = CGEvent(source: nil)?.location
+        lockedCursorPosition = cursor.currentLocation()
         setCursorFrozen(true)
         pinCursor()
 
@@ -174,13 +204,42 @@ final class EventTapManager: InputSuppressing {
     // from seeing movement, but the WindowServer still moves the cursor sprite;
     // decoupling the device from the cursor is what actually freezes it.
     private func setCursorFrozen(_ frozen: Bool) {
-        _ = CGAssociateMouseAndMouseCursorPosition(frozen ? 0 : 1)
+        cursor.setAssociated(!frozen)
     }
 
     private func pinCursor() {
         guard let lockedCursorPosition else { return }
-        CGWarpMouseCursorPosition(lockedCursorPosition)
+        cursor.warp(to: lockedCursorPosition)
         setCursorFrozen(true)
+    }
+
+    /// What the callback should do when macOS delivers a tap-disabled marker.
+    /// Pure decision logic, separated from the CGEvent.tapEnable side effects so
+    /// all (suppressing × revive-succeeded) combinations are testable — getting
+    /// this wrong either strands the user behind a misleading "re-enabled"
+    /// notice or escalates when nothing is wrong.
+    enum TapDisabledReaction: Equatable {
+        case ignore                      // not suppressing: not our tap state
+        case reenabled(message: String)  // revived: re-pin cursor + notify
+        case reviveFailed                // dead tap: escalate to recovery
+    }
+
+    /// tapEnable returns no status, so the caller must confirm the re-enable
+    /// actually took (`tapIsEnabledAfterReenable`) before reassuring the user.
+    /// If it did NOT, input is no longer suppressed and the in-tap unlock
+    /// chord is dead — escalate to a visible recovery state instead of a
+    /// misleading "re-enabled" notice.
+    static func tapDisabledReaction(
+        type: CGEventType,
+        shouldSuppress: Bool,
+        tapIsEnabledAfterReenable: Bool
+    ) -> TapDisabledReaction {
+        guard shouldSuppress else { return .ignore }
+        guard tapIsEnabledAfterReenable else { return .reviveFailed }
+        let message = type == .tapDisabledByTimeout
+            ? "The input tap was disabled by macOS after it stopped responding, then re-enabled."
+            : "The input tap was disabled by macOS, then re-enabled."
+        return .reenabled(message: message)
     }
 
     // MARK: - Callback handling (main actor)
@@ -193,20 +252,19 @@ final class EventTapManager: InputSuppressing {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if shouldSuppress, let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
-                // tapEnable returns no status, so confirm the re-enable actually
-                // took before reassuring the user. If it did NOT, input is no
-                // longer suppressed and the in-tap unlock chord is dead — escalate
-                // to a visible recovery state instead of a misleading "re-enabled"
-                // notice.
-                if CGEvent.tapIsEnabled(tap: tap) {
+                switch Self.tapDisabledReaction(
+                    type: type,
+                    shouldSuppress: shouldSuppress,
+                    tapIsEnabledAfterReenable: CGEvent.tapIsEnabled(tap: tap)
+                ) {
+                case .ignore:
+                    break
+                case .reenabled(let message):
                     setCursorFrozen(true)
                     pinCursor()
-                    let message = type == .tapDisabledByTimeout
-                        ? "The input tap was disabled by macOS after it stopped responding, then re-enabled."
-                        : "The input tap was disabled by macOS, then re-enabled."
                     log.error("Tap disabled by system; re-enabled")
                     Task { @MainActor [weak self] in self?.onTapReenabled?(message) }
-                } else {
+                case .reviveFailed:
                     log.fault("Tap disabled by system and re-enable FAILED; escalating to recovery")
                     Task { @MainActor [weak self] in self?.onTapReviveFailed?() }
                 }
