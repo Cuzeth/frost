@@ -476,46 +476,38 @@ struct LockOverlayView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func recoveryButtons(_ recovery: RecoveryState) -> some View {
-        HStack(spacing: 12) {
-            if recovery.showsAccessibilitySettings {
-                Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+    /// Single source of truth for the recovery actions — consumed by both the
+    /// horizontal and stacked layouts so the button set can never diverge.
+    /// `spacerBeforeDismiss` reproduces the horizontal layout's trailing-edge
+    /// Dismiss placement; the stacked layout omits it.
+    @ViewBuilder
+    private func recoveryActions(_ recovery: RecoveryState, spacerBeforeDismiss: Bool) -> some View {
+        if recovery.showsAccessibilitySettings {
+            Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
+            if spacerBeforeDismiss {
+                Spacer(minLength: 0)
+            }
+            Button("Dismiss") { controller.dismissRecovery() }
+                .keyboardShortcut(.cancelAction)
+        } else {
+            if recovery.allowsRetry {
+                Button("Try Again") { controller.retryRecovery() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
-                Spacer(minLength: 0)
-                Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.cancelAction)
-            } else {
-                if recovery.allowsRetry {
-                    Button("Try Again") { controller.retryRecovery() }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                }
-                Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.cancelAction)
             }
+            Button("Dismiss") { controller.dismissRecovery() }
+                .keyboardShortcut(.cancelAction)
         }
     }
 
+    private func recoveryButtons(_ recovery: RecoveryState) -> some View {
+        HStack(spacing: 12) { recoveryActions(recovery, spacerBeforeDismiss: true) }
+    }
+
     private func stackedRecoveryButtons(_ recovery: RecoveryState) -> some View {
-        VStack(spacing: 10) {
-            if recovery.showsAccessibilitySettings {
-                Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
-                Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.cancelAction)
-            } else {
-                if recovery.allowsRetry {
-                    Button("Try Again") { controller.retryRecovery() }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                }
-                Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
+        VStack(spacing: 10) { recoveryActions(recovery, spacerBeforeDismiss: false) }
     }
 }
