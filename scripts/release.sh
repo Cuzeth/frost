@@ -75,11 +75,25 @@ export DOWNLOAD_URL_PREFIX="https://github.com/$REPO_SLUG/releases/download/$TAG
 "$REPO_ROOT/scripts/publish.sh" "$APP_PATH"
 
 # --- 2. GitHub Release (uploads the DMG) ------------------------------------
+# Prefer the curated CHANGELOG.md section (the same notes Sparkle embeds in the
+# appcast). Fall back to GitHub's auto-generated notes if this version has no
+# changelog entry yet, so a forgotten changelog never blocks a release.
 echo "Creating GitHub release ${TAG}..."
-gh release create "$TAG" "$DMG" \
-  --repo "$REPO_SLUG" \
-  --title "Frost $VERSION" \
-  --generate-notes
+NOTES_FILE="$(mktemp)"
+trap 'rm -f "$NOTES_FILE"' EXIT
+if "$REPO_ROOT/scripts/changelog.sh" "$VERSION" >"$NOTES_FILE" 2>/dev/null; then
+  echo "Using CHANGELOG.md notes for $VERSION."
+  gh release create "$TAG" "$DMG" \
+    --repo "$REPO_SLUG" \
+    --title "Frost $VERSION" \
+    --notes-file "$NOTES_FILE"
+else
+  echo "warning: no CHANGELOG.md section for $VERSION; using --generate-notes." >&2
+  gh release create "$TAG" "$DMG" \
+    --repo "$REPO_SLUG" \
+    --title "Frost $VERSION" \
+    --generate-notes
+fi
 
 # --- 3. Publish the appcast via the abdeen.dev site -------------------------
 # updates.abdeen.dev is a domain alias of the abdeen.dev Vercel project, so the

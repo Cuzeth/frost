@@ -411,6 +411,11 @@ domain. The appcast's enclosure URL points at the GitHub asset.
 `release.sh` drives. Running it standalone is for dry runs and legacy
 flows, not the release procedure.
 
+Release notes for both the GitHub release and the in-app Sparkle update dialog
+come from the matching [`CHANGELOG.md`](CHANGELOG.md) section (extracted by
+`scripts/changelog.sh`), so update the changelog before cutting a release — see
+`RELEASING.md`.
+
 Sparkle's private EdDSA key belongs in the developer's login Keychain, created
 by Sparkle's `generate_keys`. It must not be committed or written into this
 repository.
