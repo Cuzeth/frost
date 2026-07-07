@@ -101,6 +101,14 @@ final class SettingsStoreTests {
         #expect(SettingsStore(defaults: defaults).lockMessage == "Agent run in progress — do not touch")
     }
 
+    @Test func allowWatchUnlockDefaultsFalseAndPersists() {
+        let store = SettingsStore(defaults: defaults)
+        #expect(store.allowWatchUnlock == false)
+
+        store.allowWatchUnlock = true
+        #expect(SettingsStore(defaults: defaults).allowWatchUnlock)
+    }
+
     @Test func settingUnlockShortcutWritesImmediately() {
         let custom = Shortcut(keyCode: UInt16(kVK_ANSI_P), modifierFlags: [.command, .option])
         let store = SettingsStore(defaults: defaults)

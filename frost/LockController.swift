@@ -112,7 +112,7 @@ final class LockController: ObservableObject {
         self.permissions = permissions ?? PermissionManager()
         self.tap = tap ?? EventTapManager()
         self.overlay = overlay ?? OverlayCoordinator()
-        self.unlocker = unlocker ?? UnlockCoordinator()
+        self.unlocker = unlocker ?? UnlockCoordinator(allowWatch: { settings.allowWatchUnlock })
         self.sleep = sleep ?? SleepAssertionManager()
         self.inactivity = inactivity ?? InactivityLockMonitor()
         self.kiosk = kiosk ?? SystemKioskMode()

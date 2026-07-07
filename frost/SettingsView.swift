@@ -31,10 +31,11 @@ struct SettingsView: View {
                         .frame(width: 170, height: 24)
                 }
                 Toggle("Start Touch ID automatically when locked", isOn: $settings.startTouchIDWhenLocked)
+                Toggle("Allow Apple Watch to unlock", isOn: $settings.allowWatchUnlock)
             } header: {
                 Text("Unlock")
             } footer: {
-                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it, or ⎋ to cancel. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires a Mac with Touch ID.\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
+                Text("Required. Press this while locked to bring up Touch ID. Click the field and press a new combo to change it, or ⎋ to cancel. Turn on automatic start to show Touch ID as soon as a lock begins. Frost requires Touch ID — or, if enabled, a paired, unlocked Apple Watch (double-press its side button when prompted).\n\nEmergency exit: if Touch ID can't unlock, run `pkill -x frost` over SSH from another device. Turn on Remote Login in System Settings before you rely on Frost.")
                     .foregroundStyle(.secondary)
             }
 

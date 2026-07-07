@@ -2,10 +2,14 @@
 //  UnlockCoordinator.swift
 //  frost
 //
-//  Wraps LocalAuthentication. Frost is Touch ID-only: the event tap suppresses
-//  keyboard input while locked, so a typed password is not a viable unlock path.
-//  Unlocking evaluates .deviceOwnerAuthenticationWithBiometrics on a fresh
-//  LAContext, which presents the standard system Touch ID prompt.
+//  Wraps LocalAuthentication. Frost is Touch ID by default: the event tap
+//  suppresses keyboard input while locked, so a typed password is not a
+//  viable unlock path. Unlocking evaluates the biometrics-only policy on a
+//  fresh LAContext, which presents the standard system Touch ID prompt. If
+//  the user has opted in to Apple Watch unlock (default off), the biometrics-
+//  or-watch variant is evaluated instead (see `effectivePolicy`) — still
+//  out-of-band from the suppressed keyboard, so the no-typed-password
+//  rationale holds.
 //
 
 import Foundation
@@ -39,20 +43,35 @@ protocol UnlockAuthenticating: AnyObject {
 @MainActor
 final class UnlockCoordinator: UnlockAuthenticating {
     private var context: LAContext?
-    private let policy: LAPolicy = .deviceOwnerAuthenticationWithBiometrics
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Unlock")
 
-    /// Frost is Touch ID-only. Check before suppressing input so machines
-    /// without a usable Touch ID path never enter a lock.
+    /// True when the user has opted in to Apple Watch unlock. Injected as a
+    /// closure so the coordinator reads the CURRENT setting at each preflight/
+    /// evaluation without owning the settings store.
+    private let allowWatch: () -> Bool
+
+    init(allowWatch: @escaping () -> Bool = { false }) {
+        self.allowWatch = allowWatch
+    }
+
+    /// Touch ID only by default; adds Watch when the user opted in. Internal so
+    /// tests can pin the selection logic.
+    var effectivePolicy: LAPolicy {
+        allowWatch() ? .deviceOwnerAuthenticationWithBiometricsOrWatch
+                     : .deviceOwnerAuthenticationWithBiometrics
+    }
+
+    /// Check before suppressing input so machines without a usable unlock
+    /// path (per `effectivePolicy`) never enter a lock.
     func checkTouchIDAvailability() -> TouchIDCheck {
         let context = LAContext()
         context.localizedFallbackTitle = ""
         var error: NSError?
-        guard context.canEvaluatePolicy(policy, error: &error),
-              context.biometryType == .touchID
+        guard context.canEvaluatePolicy(effectivePolicy, error: &error),
+              allowWatch() || context.biometryType == .touchID
         else {
             return .unavailable(
-                message: Self.touchIDUnavailableMessage(error, whileLocked: false),
+                message: Self.touchIDUnavailableMessage(error, whileLocked: false, allowsWatch: allowWatch()),
                 allowsRetry: !Self.isPermanentTouchIDAbsence(error)
             )
         }
@@ -76,18 +95,20 @@ final class UnlockCoordinator: UnlockAuthenticating {
         // Empty fallback title hides the password button — Touch ID only.
         context.localizedFallbackTitle = ""
         var error: NSError?
+        let allowsWatch = allowWatch()
 
-        guard context.canEvaluatePolicy(policy, error: &error),
-              context.biometryType == .touchID
+        guard context.canEvaluatePolicy(effectivePolicy, error: &error),
+              allowsWatch || context.biometryType == .touchID
         else {
-            return .unavailable(Self.touchIDUnavailableMessage(error, whileLocked: true))
+            return .unavailable(Self.touchIDUnavailableMessage(error, whileLocked: true, allowsWatch: allowsWatch))
         }
 
         self.context = context
         let result: AuthenticationResult = await withCheckedContinuation { continuation in
-            context.evaluatePolicy(policy,
+            context.evaluatePolicy(effectivePolicy,
                                    localizedReason: reason) { success, error in
-                continuation.resume(returning: Self.authenticationResult(success: success, error: error))
+                continuation.resume(returning: Self.authenticationResult(
+                    success: success, error: error, allowsWatch: allowsWatch))
             }
         }
 
@@ -112,7 +133,8 @@ final class UnlockCoordinator: UnlockAuthenticating {
 
     nonisolated static func authenticationResult(
         success: Bool,
-        error: Error?
+        error: Error?,
+        allowsWatch: Bool
     ) -> AuthenticationResult {
         guard !success else { return .success }
         guard let error else { return .failed }
@@ -129,7 +151,7 @@ final class UnlockCoordinator: UnlockAuthenticating {
         case .authenticationFailed, .userFallback:
             return .failed
         case .biometryLockout, .biometryNotAvailable, .biometryNotEnrolled, .passcodeNotSet:
-            return .unavailable(touchIDUnavailableMessage(nsError, whileLocked: true))
+            return .unavailable(touchIDUnavailableMessage(nsError, whileLocked: true, allowsWatch: allowsWatch))
         default:
             return .failed
         }
@@ -137,7 +159,8 @@ final class UnlockCoordinator: UnlockAuthenticating {
 
     nonisolated private static func touchIDUnavailableMessage(
         _ error: NSError?,
-        whileLocked: Bool
+        whileLocked: Bool,
+        allowsWatch: Bool
     ) -> String {
         if whileLocked {
             // Lockout is terminal while input is suppressed: it clears only via
@@ -175,6 +198,12 @@ final class UnlockCoordinator: UnlockAuthenticating {
 
         switch code {
         case .biometryNotAvailable:
+            if allowsWatch {
+                return """
+                    Frost requires Touch ID or a paired, unlocked Apple Watch. \
+                    Neither is available right now, so input was not locked.
+                    """
+            }
             return """
                 Frost requires Touch ID. This Mac does not report a usable Touch \
                 ID sensor, so input was not locked.

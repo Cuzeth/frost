@@ -11,6 +11,8 @@
 //    • preventScreenSaver / preventSleep — power assertions held while locked.
 //    • lockMessage        — OPTIONAL; owner-supplied text shown on the locked
 //                          overlay (empty = none).
+//    • allowWatchUnlock   — OPTIONAL; also accepts a paired, unlocked Apple
+//                          Watch as an unlock path. Defaults to false.
 //
 //  Published so the Settings UI updates live; LockController reads the current
 //  values when a lock begins (settings can't change while locked — input is
@@ -43,6 +45,9 @@ final class SettingsStore: ObservableObject {
     @Published var lockMessage: String {
         didSet { defaults.set(lockMessage, forKey: Key.lockMessage) }
     }
+    @Published var allowWatchUnlock: Bool {
+        didSet { defaults.set(allowWatchUnlock, forKey: Key.allowWatchUnlock) }
+    }
 
     private let defaults: UserDefaults
 
@@ -61,6 +66,7 @@ final class SettingsStore: ObservableObject {
         static let preventScreenSaver = "preventScreenSaver"
         static let preventSleep = "preventSleep"
         static let lockMessage = "lockMessage"
+        static let allowWatchUnlock = "allowWatchUnlock"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -75,6 +81,7 @@ final class SettingsStore: ObservableObject {
         self.preventScreenSaver = defaults.bool(forKey: Key.preventScreenSaver)
         self.preventSleep = defaults.bool(forKey: Key.preventSleep)
         self.lockMessage = defaults.string(forKey: Key.lockMessage) ?? ""
+        self.allowWatchUnlock = defaults.bool(forKey: Key.allowWatchUnlock)
         if self.lockShortcut == self.unlockShortcut {
             self.lockShortcut = nil
             write(nil, forKey: Key.lockShortcut)
