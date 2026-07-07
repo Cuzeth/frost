@@ -146,7 +146,23 @@ echo "Built DMG: $DMG_PATH"
 # containing only this release's DMG. That keeps stray/aborted files in dist/
 # out of the public appcast.
 cp -p "$DMG_PATH" "$APPCAST_INPUT/"
+
+# Attach this version's CHANGELOG.md section as release notes. generate_appcast
+# picks up a notes file whose name matches the archive (minus extension), so
+# name it to match the DMG; --embed-release-notes renders the Markdown inline
+# into the item's <description>. This is the same text scripts/release.sh puts
+# on the GitHub release — one source, so the update dialog and GitHub agree.
+NOTES_MD="$APPCAST_INPUT/Frost-$SHORT_VERSION.md"
+if "$REPO_ROOT/scripts/changelog.sh" "$SHORT_VERSION" >"$NOTES_MD" 2>/dev/null; then
+  echo "Attached release notes for $SHORT_VERSION from CHANGELOG.md."
+else
+  rm -f "$NOTES_MD"
+  echo "warning: no CHANGELOG.md section for $SHORT_VERSION;" >&2
+  echo "the appcast item will ship without release notes." >&2
+fi
+
 "$SPARKLE_BIN/generate_appcast" \
+  --embed-release-notes \
   --download-url-prefix "$DOWNLOAD_URL_PREFIX" \
   -o "$DIST_DIR/appcast.xml" \
   "$APPCAST_INPUT"

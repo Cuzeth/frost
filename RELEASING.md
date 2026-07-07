@@ -46,14 +46,21 @@ is never uploaded to your domain. The download page doesn't change per release.
 
 ## Cutting a release
 
-1. **Bump the version** in the Xcode target (both must change; `CURRENT_PROJECT_VERSION`
+1. **Update the changelog.** In `CHANGELOG.md`, leave the `## [Unreleased]`
+   heading and its comment in place and insert a new `## [x.y.z] - YYYY-MM-DD`
+   heading directly below them (e.g. `## [1.0.1] - 2026-07-14`), so this
+   release's accumulated entries fall under it. Repoint the `[Unreleased]` link
+   at the new tag and add a matching compare-link at the bottom of the file.
+   That version section becomes **both** the GitHub release notes and the
+   Sparkle update description, so write it for a user. Commit it.
+2. **Bump the version** in the Xcode target (both must change; `CURRENT_PROJECT_VERSION`
    must strictly increase — Sparkle compares it):
    - `MARKETING_VERSION` → e.g. `1.0.1` (the display + tag version)
    - `CURRENT_PROJECT_VERSION` → e.g. `2`
-2. **Push** `main` so the tag will reference a real remote commit.
-3. **Archive → Distribute → Developer ID** in Xcode: sign, notarize, staple,
+3. **Push** `main` so the tag will reference a real remote commit.
+4. **Archive → Distribute → Developer ID** in Xcode: sign, notarize, staple,
    export `frost.app`.
-4. **Run the release script** (builds the DMG, signs the appcast, creates the
+5. **Run the release script** (builds the DMG, signs the appcast, creates the
    GitHub release, and commits + pushes the appcast to the abdeen.dev repo so
    Vercel deploys it):
    ```sh
@@ -62,9 +69,10 @@ is never uploaded to your domain. The download page doesn't change per release.
    `ABDEEN_DEV_REPO` defaults to `../abdeen.dev` (a sibling checkout), so you can
    omit it if the repos sit side by side. Add `DEPLOY=0` to build + create the
    release but only write the appcast into the repo (no commit/push).
-5. **Verify**: open the GitHub release, confirm the `.dmg` downloads and opens
+6. **Verify**: open the GitHub release, confirm the `.dmg` downloads and opens
    without a Gatekeeper warning, then confirm an older build sees the update via
-   *Check for Updates…*.
+   *Check for Updates…* — and that the update dialog now shows the release notes
+   from the changelog.
 
 ## What `release.sh` does
 
@@ -74,3 +82,12 @@ Tag is `v$MARKETING_VERSION`. It refuses to overwrite an existing release. It se
 `<abdeen.dev>/public/frost/appcast.xml` and commits + pushes **only that file**
 (a pathspec commit, so unrelated working changes are never swept in). Apple and
 Sparkle private keys stay in your Keychain the whole time.
+
+Release notes for **both** the GitHub release and the appcast's `<description>`
+come from the matching `CHANGELOG.md` section, extracted by `scripts/changelog.sh`:
+`release.sh` passes it to `gh release create --notes-file`, and `publish.sh`
+writes it next to the DMG as `Frost-<version>.md` so `generate_appcast
+--embed-release-notes` renders it into the appcast. If the version has no
+changelog section yet, the GitHub release falls back to `--generate-notes` and
+the appcast item ships without notes (both scripts print a warning) — so a
+forgotten changelog degrades gracefully instead of blocking the release.
