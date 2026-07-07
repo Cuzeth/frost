@@ -374,13 +374,20 @@ final class LockControllerTests {
 
         controller.lock()
         tap.onUnlockChord?()   // hops to the main actor via a spawned Task
-        // Don't assert the transient .authenticating state: the fake unlocker
-        // succeeds instantly, so chord → arm → success → unlocked can all
-        // happen inside one sleep and the window is unobservable under load.
-        // Wait (bounded ~2s) for the terminal state and prove the chord drove
-        // the flow through the unlocker.
-        for _ in 0..<200 where controller.state != .unlocked {
-            try? await Task.sleep(for: .milliseconds(10))
+        // Yield the main actor (no wall-clock sleeps) until the chord's deferred
+        // hop has run requestUnlock() — observable as either the armed
+        // authenticationTask or, if the whole instant-success flow already
+        // finished, the terminal unlocked state. Then await the task so the
+        // completion handler has run before asserting.
+        var yields = 0
+        while controller.authenticationTask == nil,
+              controller.state != .unlocked,
+              yields < 10_000 {
+            await Task.yield()
+            yields += 1
+        }
+        if let task = controller.authenticationTask {
+            await task.value
         }
         #expect(controller.state == .unlocked)
         #expect(unlocker.authenticateCount == 1)
