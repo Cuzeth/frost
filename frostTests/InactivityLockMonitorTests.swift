@@ -105,6 +105,35 @@ final class InactivityLockMonitorTests {
         #expect(lockCount == 1)
     }
 
+    @Test func failedLockSnoozeSurvivesTeardownBaselineReset() {
+        let settings = SettingsStore(defaults: defaults)
+        settings.inactivityLock = .thirtySeconds
+        let monitor = makeMonitor(settings: settings)
+        defer { monitor.stop() }
+
+        systemIdleSeconds = 999
+
+        // Runtime sequence: auto-lock fails → enterRecovery snoozes (while the
+        // controller is in .recovery, so polling is blocked) → the user exits
+        // recovery → teardown() resets the baseline → polling resumes unlocked.
+        locked = true
+        monitor.snoozeAfterFailedLock()
+        advance(by: 5)
+        monitor.resetIdleBaseline()   // what teardown() calls
+        locked = false
+
+        monitor.poll()                // t=5s: snoozed until t=60
+        #expect(lockCount == 0)
+
+        advance(by: 54)               // t=59s
+        monitor.poll()
+        #expect(lockCount == 0)
+
+        advance(by: 1)                // t=60s: snooze expired, baseline elapsed 55s ≥ 30s
+        monitor.poll()
+        #expect(lockCount == 1)
+    }
+
     @Test func lockedStateSuppressesAutoLockAttempts() {
         let settings = SettingsStore(defaults: defaults)
         settings.inactivityLock = .thirtySeconds
