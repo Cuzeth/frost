@@ -89,6 +89,16 @@ struct SettingsView: View {
             }
 
             Section {
+                TextField("Message", text: $settings.lockMessage,
+                          prompt: Text("Optional, e.g. \u{201C}Agent run in progress — do not touch\u{201D}"))
+            } header: {
+                Text("Overlay Message")
+            } footer: {
+                Text("Shown on the locked overlay while input is suppressed. Leave empty for none.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Launch at login", isOn: Binding(
                     get: { launchAtLogin.isEnabled },
                     set: { launchAtLogin.setEnabled($0) }

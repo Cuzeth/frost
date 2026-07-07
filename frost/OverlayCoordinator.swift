@@ -273,6 +273,13 @@ struct LockOverlayView: View {
                     unlockPrompt
                 }
 
+                if !controller.lockMessage.isEmpty {
+                    Text(controller.lockMessage)
+                        .font(.callout.weight(.medium))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 safetyStrip
 
                 if let notice = controller.tapRecoveryNotice {

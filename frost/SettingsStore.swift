@@ -9,6 +9,8 @@
 //    • startTouchIDWhenLocked — OPTIONAL; opens Touch ID as soon as a lock begins
 //                          instead of waiting for the unlock shortcut.
 //    • preventScreenSaver / preventSleep — power assertions held while locked.
+//    • lockMessage        — OPTIONAL; owner-supplied text shown on the locked
+//                          overlay (empty = none).
 //
 //  Published so the Settings UI updates live; LockController reads the current
 //  values when a lock begins (settings can't change while locked — input is
@@ -38,6 +40,9 @@ final class SettingsStore: ObservableObject {
     @Published var preventSleep: Bool {
         didSet { defaults.set(preventSleep, forKey: Key.preventSleep) }
     }
+    @Published var lockMessage: String {
+        didSet { defaults.set(lockMessage, forKey: Key.lockMessage) }
+    }
 
     private let defaults: UserDefaults
 
@@ -55,6 +60,7 @@ final class SettingsStore: ObservableObject {
         static let startTouchIDWhenLocked = "startTouchIDWhenLocked"
         static let preventScreenSaver = "preventScreenSaver"
         static let preventSleep = "preventSleep"
+        static let lockMessage = "lockMessage"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -68,6 +74,7 @@ final class SettingsStore: ObservableObject {
         self.startTouchIDWhenLocked = defaults.bool(forKey: Key.startTouchIDWhenLocked)
         self.preventScreenSaver = defaults.bool(forKey: Key.preventScreenSaver)
         self.preventSleep = defaults.bool(forKey: Key.preventSleep)
+        self.lockMessage = defaults.string(forKey: Key.lockMessage) ?? ""
         if self.lockShortcut == self.unlockShortcut {
             self.lockShortcut = nil
             write(nil, forKey: Key.lockShortcut)
