@@ -107,20 +107,41 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
         log.info("Overlay dismissed")
     }
 
+    /// What a screen-parameters change should do. Pure: rebuilding mid-auth
+    /// churns focus out from under the live Touch ID prompt, so it must defer.
+    enum ScreenChangeAction: Equatable {
+        case ignore              // no windows: nothing presented, nothing to do
+        case deferUntilAuthEnds  // live Touch ID prompt: rebuild later
+        case rebuild
+    }
+
+    static func screenChangeAction(hasWindows: Bool, isAuthenticating: Bool) -> ScreenChangeAction {
+        guard hasWindows else { return .ignore }
+        return isAuthenticating ? .deferUntilAuthEnds : .rebuild
+    }
+
+    static func shouldApplyDeferredRebuild(needsRebuildAfterAuth: Bool, hasWindows: Bool) -> Bool {
+        needsRebuildAfterAuth && hasWindows
+    }
+
     @objc private func screenParametersChanged() {
-        guard !windows.isEmpty else { return }
         // Never rebuild while a Touch ID evaluation is live: rebuild() recreates
         // every overlay window, churning focus out from under the system prompt.
         // Hiding the menu bar for kiosk mode (at lock) and display sleep/wake
         // (after idle) both fire this notification right when the first prompt is
         // up. Defer the rebuild until authentication ends.
-        if controller?.isAuthenticating == true {
+        switch Self.screenChangeAction(
+            hasWindows: !windows.isEmpty, isAuthenticating: controller?.isAuthenticating == true
+        ) {
+        case .ignore:
+            return
+        case .deferUntilAuthEnds:
             needsRebuildAfterAuth = true
             log.info("Screen parameters changed during auth; deferring overlay rebuild")
-            return
+        case .rebuild:
+            rebuild()
+            show()
         }
-        rebuild()
-        show()
     }
 
     /// Apply a rebuild that was deferred because the screen-parameters change
@@ -128,7 +149,9 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
     /// the idle locked state, so the overlay still picks up any real display
     /// change that happened while the prompt was up.
     func rebuildIfDeferred() {
-        guard needsRebuildAfterAuth, !windows.isEmpty else { return }
+        guard Self.shouldApplyDeferredRebuild(
+            needsRebuildAfterAuth: needsRebuildAfterAuth, hasWindows: !windows.isEmpty
+        ) else { return }
         needsRebuildAfterAuth = false
         log.info("Applying overlay rebuild deferred during auth")
         rebuild()
@@ -151,13 +174,23 @@ final class OverlayCoordinator: NSObject, OverlayPresenting {
     /// display and the keyed window follows it across rebuilds. Falls back to the
     /// main screen, then the first screen, if the cursor isn't on any screen.
     private static func activeScreenIndex(in screens: [NSScreen]) -> Int {
-        guard !screens.isEmpty else { return 0 }
-        let mouse = NSEvent.mouseLocation
-        if let index = screens.firstIndex(where: { $0.frame.contains(mouse) }) {
+        activeScreenIndex(
+            frames: screens.map(\.frame),
+            mouse: NSEvent.mouseLocation,
+            mainIndex: NSScreen.main.flatMap { screens.firstIndex(of: $0) }
+        )
+    }
+
+    /// Pure core of active-display selection: the display the mouse is on, else
+    /// the main display, else the first. `mainIndex` is NSScreen.main's index in
+    /// the same array (nil when unknown).
+    static func activeScreenIndex(frames: [CGRect], mouse: CGPoint, mainIndex: Int?) -> Int {
+        guard !frames.isEmpty else { return 0 }
+        if let index = frames.firstIndex(where: { $0.contains(mouse) }) {
             return index
         }
-        if let main = NSScreen.main, let index = screens.firstIndex(of: main) {
-            return index
+        if let mainIndex, frames.indices.contains(mainIndex) {
+            return mainIndex
         }
         return 0
     }
@@ -443,46 +476,38 @@ struct LockOverlayView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func recoveryButtons(_ recovery: RecoveryState) -> some View {
-        HStack(spacing: 12) {
-            if recovery.showsAccessibilitySettings {
-                Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+    /// Single source of truth for the recovery actions — consumed by both the
+    /// horizontal and stacked layouts so the button set can never diverge.
+    /// `spacerBeforeDismiss` reproduces the horizontal layout's trailing-edge
+    /// Dismiss placement; the stacked layout omits it.
+    @ViewBuilder
+    private func recoveryActions(_ recovery: RecoveryState, spacerBeforeDismiss: Bool) -> some View {
+        if recovery.showsAccessibilitySettings {
+            Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
+            if spacerBeforeDismiss {
+                Spacer(minLength: 0)
+            }
+            Button("Dismiss") { controller.dismissRecovery() }
+                .keyboardShortcut(.cancelAction)
+        } else {
+            if recovery.allowsRetry {
+                Button("Try Again") { controller.retryRecovery() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
-                Spacer(minLength: 0)
-                Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.cancelAction)
-            } else {
-                if recovery.allowsRetry {
-                    Button("Try Again") { controller.retryRecovery() }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                }
-                Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.cancelAction)
             }
+            Button("Dismiss") { controller.dismissRecovery() }
+                .keyboardShortcut(.cancelAction)
         }
     }
 
+    private func recoveryButtons(_ recovery: RecoveryState) -> some View {
+        HStack(spacing: 12) { recoveryActions(recovery, spacerBeforeDismiss: true) }
+    }
+
     private func stackedRecoveryButtons(_ recovery: RecoveryState) -> some View {
-        VStack(spacing: 10) {
-            if recovery.showsAccessibilitySettings {
-                Button("Open Privacy Settings") { controller.openAccessibilitySettings() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                Button("Quit & Reopen Frost") { controller.quitAndReopenFrost() }
-                Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.cancelAction)
-            } else {
-                if recovery.allowsRetry {
-                    Button("Try Again") { controller.retryRecovery() }
-                        .buttonStyle(.borderedProminent)
-                        .keyboardShortcut(.defaultAction)
-                }
-                Button("Dismiss") { controller.dismissRecovery() }
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
+        VStack(spacing: 10) { recoveryActions(recovery, spacerBeforeDismiss: false) }
     }
 }
