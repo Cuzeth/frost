@@ -209,8 +209,13 @@ starts the same lock as the menu item — every preflight (Touch ID
 availability, Accessibility) and every recovery behavior applies unchanged —
 and is a no-op if Frost is already locked or showing the recovery overlay.
 
-From a terminal, after Frost has been launched once so macOS registers the
-action:
+After Frost has been launched once, the action appears in Shortcuts.app's
+action gallery. App Shortcuts published this way are not visible to the
+`shortcuts` command-line tool's library, so it cannot find the action
+directly. To run it from a terminal or script, first create a shortcut in
+Shortcuts.app that contains the Lock Input action — a one-time step — and
+name it, e.g., "Lock Input". After that, running the shortcut from the
+command line works:
 
 ```sh
 shortcuts run "Lock Input"
