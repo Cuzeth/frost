@@ -62,15 +62,20 @@ enum LockInputIntentError: Error, CustomLocalizedStringResourceConvertible {
 /// runnable via `shortcuts run`) without the user assembling anything.
 struct FrostShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
+        #if DEBUG
         AppShortcut(
             intent: LockInputIntent(),
             phrases: ["Lock input with \(.applicationName)"],
-            #if DEBUG
             shortTitle: "Lock Input (Dev)",
-            #else
-            shortTitle: "Lock Input",
-            #endif
             systemImageName: "lock.fill"
         )
+        #else
+        AppShortcut(
+            intent: LockInputIntent(),
+            phrases: ["Lock input with \(.applicationName)"],
+            shortTitle: "Lock Input",
+            systemImageName: "lock.fill"
+        )
+        #endif
     }
 }
