@@ -6,7 +6,10 @@
 //  transition that decides whether input gets suppressed, whether resources
 //  are released, and whether the user is shown recovery instead of being
 //  trapped. No real tap, overlay, Touch ID prompt, kiosk options, or signal
-//  handlers are involved (managesSystemHooks: false).
+//  handlers are involved — process-level hooks are replaced with
+//  FakeSystemHooks, and the controller is constructed with
+//  `registersAsShared: false` so it never steals `LockController.shared`
+//  from the test-host process.
 //
 
 import AppKit
@@ -107,6 +110,22 @@ private final class FakeKiosk: KioskModeControlling {
     func exitKioskMode() { exitCount += 1 }
 }
 
+@MainActor
+private final class FakeSystemHooks: SystemHooking {
+    private(set) var onSignal: (@MainActor () -> Void)?
+    private(set) var onLockHotKey: (@MainActor (UInt16, NSEvent.ModifierFlags) -> Void)?
+    private(set) var onAccessibilityChange: (@MainActor () -> Void)?
+    private(set) var terminateCount = 0
+    private(set) var removeMonitorCount = 0
+    private(set) var removeAllCount = 0
+    func installTerminationHandlers(onSignal: @escaping @MainActor () -> Void) { self.onSignal = onSignal }
+    func installLockHotKeyMonitor(onKeyDown: @escaping @MainActor (UInt16, NSEvent.ModifierFlags) -> Void) { onLockHotKey = onKeyDown }
+    func removeLockHotKeyMonitor() { removeMonitorCount += 1 }
+    func observeAccessibilityTrustChanges(onChange: @escaping @MainActor () -> Void) { onAccessibilityChange = onChange }
+    func terminateApp() { terminateCount += 1 }
+    func removeAll() { removeAllCount += 1 }
+}
+
 // MARK: - Tests
 
 @MainActor
@@ -121,6 +140,7 @@ final class LockControllerTests {
     private let sleep = FakeSleep()
     private let inactivity = FakeInactivity()
     private let kiosk = FakeKiosk()
+    private let hooks = FakeSystemHooks()
 
     init() {
         suiteName = "dev.abdeen.frost.lock-tests.\(UUID().uuidString)"
@@ -142,7 +162,8 @@ final class LockControllerTests {
             sleep: sleep,
             inactivity: inactivity,
             kiosk: kiosk,
-            managesSystemHooks: false
+            hooks: hooks,
+            registersAsShared: false
         )
     }
 
@@ -429,5 +450,59 @@ final class LockControllerTests {
         #if DEBUG
         #expect(controller.debugSecondsRemaining == nil)
         #endif
+    }
+
+    // MARK: SIGTERM contract — the remote-kill path (AGENTS.md: "the SIGTERM
+    // handler is the contract"). These drive FakeSystemHooks' captured
+    // `onSignal` callback exactly as SystemHooks would invoke it from a real
+    // signal source, without installing any process-level hooks.
+
+    @Test func terminationSignalWhileLockedTearsDownEverythingThenTerminates() {
+        let controller = makeController()
+
+        controller.lock()
+        #expect(controller.state == .locked)
+
+        hooks.onSignal?()
+
+        #expect(tap.stopCount == 1)
+        #expect(kiosk.exitCount == 1)
+        #expect(sleep.releaseCount >= 1)
+        #expect(overlay.dismissCount == 1)
+        #expect(unlocker.cancelCount >= 1)
+        #expect(controller.state == .unlocked)
+        #expect(hooks.terminateCount == 1)
+    }
+
+    @Test func terminationSignalWhileAuthenticatingCancelsAuthAndTerminates() async {
+        let controller = makeController()
+
+        controller.lock()
+        controller.requestUnlock()
+        #expect(controller.state == .authenticating)
+
+        hooks.onSignal?()
+
+        if let task = controller.authenticationTask {
+            await task.value
+        }
+
+        #expect(controller.state == .unlocked)
+        #expect(hooks.terminateCount == 1)
+    }
+
+    @Test func terminationSignalWhileUnlockedStillTerminatesCleanly() {
+        let controller = makeController()
+
+        hooks.onSignal?()
+
+        #expect(controller.state == .unlocked)
+        #expect(hooks.terminateCount == 1)
+    }
+
+    @Test func signalHandlersAreInstalledAtInit() {
+        _ = makeController()
+
+        #expect(hooks.onSignal != nil)
     }
 }

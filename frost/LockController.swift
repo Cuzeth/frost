@@ -15,7 +15,6 @@
 
 import AppKit
 import Combine
-import CoreGraphics
 import Foundation
 import os
 
@@ -48,24 +47,23 @@ final class LockController: ObservableObject {
     private let sleep: any SleepAsserting
     private let inactivity: any InactivityMonitoring
     private let kiosk: any KioskModeControlling
+    private let hooks: any SystemHooking
     private let settings: SettingsStore
-    /// False in unit tests: skips the process-level hooks (signal handlers, the
-    /// global NSEvent monitor, the distributed Accessibility observer) that
-    /// would otherwise leak out of the test into the host process.
-    private let managesSystemHooks: Bool
+    /// False in unit tests: skips registering this controller as
+    /// `Self.shared` so a test-injected controller can't steal it from the
+    /// app instance hosting the test run.
+    private let registersAsShared: Bool
     private let log = Logger(subsystem: "dev.abdeen.frost", category: "Lock")
     private var accessibilityTrustedAtLaunch = false
     private var accessibilityRequiresRelaunch = false
 
-    /// Weak global handle so the SIGTERM dispatch source can reach the live
-    /// controller without capturing it in a @Sendable closure.
+    /// Weak global handle so UpdaterController can reach the live controller
+    /// without holding a strong reference to it.
     nonisolated(unsafe) static weak var shared: LockController?
-    private var signalSources: [any DispatchSourceSignal] = []
-    /// Global key monitor for the optional lock hotkey (active while unlocked).
-    private var lockHotKeyMonitor: Any?
-    /// Observer for Accessibility-trust changes, so the optional lock hotkey
-    /// monitor can be removed if trust disappears while Frost is running.
-    private var accessibilityObserver: (any NSObjectProtocol)?
+    /// Whether `hooks.installLockHotKeyMonitor` currently has a live monitor
+    /// installed. `SystemHooking` doesn't expose its internal monitor state,
+    /// so this mirrors it here.
+    private var lockHotKeyMonitorInstalled = false
     /// Internal get so state-machine tests can await the in-flight evaluation.
     private(set) var authenticationTask: Task<Void, Never>?
 
@@ -93,8 +91,8 @@ final class LockController: ObservableObject {
 
     /// Collaborators default (nil) to the real implementations, constructed in
     /// the body because default-argument expressions are nonisolated and the
-    /// real initializers are main-actor-isolated. Tests inject fakes and pass
-    /// `managesSystemHooks: false`.
+    /// real initializers are main-actor-isolated. Tests inject fakes via
+    /// `hooks:` and pass `registersAsShared: false`.
     init(
         settings: SettingsStore,
         permissions: (any AccessibilityChecking)? = nil,
@@ -104,7 +102,8 @@ final class LockController: ObservableObject {
         sleep: (any SleepAsserting)? = nil,
         inactivity: (any InactivityMonitoring)? = nil,
         kiosk: (any KioskModeControlling)? = nil,
-        managesSystemHooks: Bool = true
+        hooks: (any SystemHooking)? = nil,
+        registersAsShared: Bool = true
     ) {
         self.settings = settings
         self.permissions = permissions ?? PermissionManager()
@@ -114,7 +113,8 @@ final class LockController: ObservableObject {
         self.sleep = sleep ?? SleepAssertionManager()
         self.inactivity = inactivity ?? InactivityLockMonitor()
         self.kiosk = kiosk ?? SystemKioskMode()
-        self.managesSystemHooks = managesSystemHooks
+        self.hooks = hooks ?? SystemHooks()
+        self.registersAsShared = registersAsShared
         accessibilityTrustedAtLaunch = self.permissions.hasAccessibility()
         self.tap.unlockShortcut = settings.unlockShortcut
         // Defer to the next main-loop tick so we never mutate the tap from
@@ -128,14 +128,18 @@ final class LockController: ObservableObject {
         self.tap.onTapReviveFailed = { [weak self] in
             self?.handleTapReviveFailure()
         }
-        if managesSystemHooks {
-            // Only the signal path reads Self.shared — a test-injected
-            // controller must not steal it from the app instance hosting the
-            // test run.
+        if registersAsShared {
+            // UpdaterController reads Self.shared; a test-injected controller
+            // must not steal it from the app instance hosting the test run.
             Self.shared = self
-            installTerminationHandler()
-            installLockHotKeyMonitor()
         }
+        self.hooks.installTerminationHandlers { [weak self] in
+            self?.handleTerminationSignal()
+        }
+        self.hooks.observeAccessibilityTrustChanges { [weak self] in
+            self?.refreshLockHotKeyMonitor(reinstall: true)
+        }
+        refreshLockHotKeyMonitor()
         self.inactivity.start(settings: settings, lock: self)
     }
 
@@ -147,42 +151,17 @@ final class LockController: ObservableObject {
     /// reads like a safety net.
     deinit {
         MainActor.assumeIsolated {
-            removeLockHotKeyMonitor()
-            if let accessibilityObserver {
-                DistributedNotificationCenter.default().removeObserver(accessibilityObserver)
-            }
-            signalSources.forEach { $0.cancel() }
+            hooks.removeAll()
             if Self.shared === self {
                 Self.shared = nil
             }
         }
     }
 
-    /// Optional system-wide hotkey that STARTS a lock. A non-consuming global
-    /// monitor is enough: it only needs to trigger a lock, and it never fires
-    /// while Frost itself is frontmost (so it won't clash with the recorder).
-    ///
-    /// `NSEvent` global *keyboard* monitors only deliver events while the
-    /// process is trusted for Accessibility. Frost requests Accessibility
-    /// lazily, so don't install the monitor unless trust was already active when
-    /// this process launched.
-    private func installLockHotKeyMonitor() {
-        accessibilityObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.apple.accessibility.api"),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in self.refreshLockHotKeyMonitor(reinstall: true) }
-        }
-        refreshLockHotKeyMonitor()
-    }
-
     /// Install only when Accessibility was active at launch and remains active
     /// now. A new grant needs a Frost relaunch before the lock hotkey or event
     /// tap are considered usable.
     private func refreshLockHotKeyMonitor(reinstall: Bool = false) {
-        guard managesSystemHooks else { return }
         let currentlyTrusted = permissions.hasAccessibility()
         if !currentlyTrusted {
             accessibilityRequiresRelaunch = true
@@ -192,22 +171,22 @@ final class LockController: ObservableObject {
               !accessibilityRequiresRelaunch,
               currentlyTrusted
         else {
-            removeLockHotKeyMonitor()
+            hooks.removeLockHotKeyMonitor()
+            lockHotKeyMonitorInstalled = false
             return
         }
 
         if reinstall {
-            removeLockHotKeyMonitor()
-        } else if lockHotKeyMonitor != nil {
+            hooks.removeLockHotKeyMonitor()
+            lockHotKeyMonitorInstalled = false
+        } else if lockHotKeyMonitorInstalled {
             return
         }
 
-        lockHotKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            // Pull the Sendable bits out here; hop to the main actor to act.
-            let keyCode = event.keyCode
-            let modifiers = event.modifierFlags
-            Task { @MainActor in self?.handleLockHotKey(keyCode: keyCode, modifiers: modifiers) }
+        hooks.installLockHotKeyMonitor { [weak self] keyCode, modifiers in
+            self?.handleLockHotKey(keyCode: keyCode, modifiers: modifiers)
         }
+        lockHotKeyMonitorInstalled = true
     }
 
     private func hasUsableAccessibility() -> Bool {
@@ -216,63 +195,15 @@ final class LockController: ObservableObject {
             && permissions.hasAccessibility()
     }
 
-    private func removeLockHotKeyMonitor() {
-        if let lockHotKeyMonitor {
-            NSEvent.removeMonitor(lockHotKeyMonitor)
-            self.lockHotKeyMonitor = nil
-        }
-    }
-
     private func handleLockHotKey(keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
         guard state == .unlocked, let shortcut = settings.lockShortcut else { return }
         if shortcut.matches(keyCode: keyCode, modifiers: modifiers) { lock() }
     }
 
-    /// Catch SIGTERM (e.g. from `pkill`/`kill` over SSH) so we can restore the
-    /// cursor + release the tap before exiting — never die with the cursor still
-    /// decoupled from the mouse. SIGINT and SIGHUP get the same treatment: the
-    /// documented "terminal opened before locking" escape route can also deliver
-    /// Ctrl-C or a hangup on session close, whose default action would kill the
-    /// process without any teardown.
-    private func installTerminationHandler() {
-        // Deliberately NOT the main queue: the watchdog's whole point is to act
-        // when the main thread is wedged.
-        let watchdogQueue = DispatchQueue(label: "dev.abdeen.frost.termination-watchdog")
-        for sig in [SIGTERM, SIGINT, SIGHUP] {
-            signal(sig, SIG_IGN)
-            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-            source.setEventHandler {
-                Task { @MainActor in LockController.shared?.handleTerminationSignal() }
-            }
-            source.resume()
-            signalSources.append(source)
-
-            // Watchdog: the clean handler above runs on the main queue, and the
-            // signal's default action was replaced with SIG_IGN — so if the main
-            // thread ever wedges while locked, `pkill -x frost` would otherwise
-            // be silently ignored and the remote-kill contract would be dead.
-            // If the process is still alive this long after the signal, the
-            // clean path failed: restore the cursor association (best effort,
-            // callable off-main) and force-exit — macOS reclaims the tap and
-            // presentation options at process death. `_exit` skips atexit
-            // handlers, which could block on the wedged main thread.
-            let watchdog = DispatchSource.makeSignalSource(signal: sig, queue: watchdogQueue)
-            watchdog.setEventHandler { @Sendable in
-                Thread.sleep(forTimeInterval: 5)
-                CGAssociateMouseAndMouseCursorPosition(1)
-                Logger(subsystem: "dev.abdeen.frost", category: "Lock")
-                    .fault("Teardown did not finish after a termination signal; force-exiting")
-                _exit(EXIT_FAILURE)
-            }
-            watchdog.resume()
-            signalSources.append(watchdog)
-        }
-    }
-
     private func handleTerminationSignal() {
         log.notice("Termination signal received; tearing down before exit")
         teardown()
-        NSApp.terminate(nil)
+        hooks.terminateApp()
     }
 
     // MARK: - Lock
