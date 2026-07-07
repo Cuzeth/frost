@@ -105,9 +105,12 @@ final class InactivityLockMonitor: InactivityMonitoring {
 
     /// Reset Frost's local auto-lock clock after user-visible actions that may not
     /// update CoreGraphics' keyboard/mouse idle timer (notably Touch ID unlock).
+    /// Deliberately preserves an active failed-lock snooze: teardown() calls this
+    /// on every path out of recovery, and clearing the snooze here is what made
+    /// the failed-lock debounce dead code (it never survived into a state where
+    /// poll() actually runs).
     func resetIdleBaseline() {
         baselineDate = now()
-        snoozedUntil = nil
     }
 
     func snoozeAfterFailedLock() {
