@@ -13,8 +13,10 @@
 #      signs the DMG with the EdDSA private key (read from the login Keychain)
 #      and writes appcast.xml.
 #
-# Then upload BOTH dist/Frost-<version>.dmg and dist/appcast.xml to:
-#   https://updates.abdeen.dev/frost/
+# Outputs land in dist/. Releases are normally cut via scripts/release.sh,
+# which uploads the DMG to GitHub Releases and publishes the appcast to the
+# update host (see RELEASING.md); standalone runs of this script are for
+# local dry runs.
 #
 # Usage:
 #   scripts/publish.sh [path/to/frost.app]
@@ -154,6 +156,7 @@ echo "Done."
 echo "  DMG:     $DMG_PATH"
 echo "  Appcast: $DIST_DIR/appcast.xml"
 echo
-echo "Next: upload BOTH files to ${DOWNLOAD_URL_PREFIX}"
+echo "Next: releases are normally cut with scripts/release.sh, which uploads the"
+echo "DMG to GitHub Releases and publishes the appcast (see RELEASING.md)."
 echo "(If generate_appcast reported a missing key, run Sparkle's generate_keys"
 echo " once — it stores the private key in your login Keychain.)"
