@@ -1,0 +1,106 @@
+<svg width="1200" height="320" viewBox="0 0 1200 320" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Frost — macOS menu-bar input locker">
+  <title>Frost — macOS menu-bar input locker</title>
+  <defs>
+    <!-- Deep frozen-glass background -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0A1524"/>
+      <stop offset="0.55" stop-color="#0D2033"/>
+      <stop offset="1" stop-color="#12314E"/>
+    </linearGradient>
+    <!-- Aurora glows -->
+    <radialGradient id="glowLeft" cx="0.29" cy="0.5" r="0.55">
+      <stop offset="0" stop-color="#57A9E8" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#57A9E8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowRight" cx="0.88" cy="0.12" r="0.6">
+      <stop offset="0" stop-color="#7FD0FF" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#7FD0FF" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Icy wordmark gradient (echoes the app icon: white ice into brand blue) -->
+    <linearGradient id="ice" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F4FAFF"/>
+      <stop offset="0.6" stop-color="#CBE6FA"/>
+      <stop offset="1" stop-color="#8FC3EC"/>
+    </linearGradient>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+    <!-- One snowflake arm; six rotated copies make the flake -->
+    <g id="arm">
+      <path d="M0,-7 L0,-44 M0,-24 L-10,-33 M0,-24 L10,-33 M0,-36 L-8,-44 M0,-36 L8,-44"/>
+    </g>
+    <g id="flake">
+      <use href="#arm"/>
+      <use href="#arm" transform="rotate(60)"/>
+      <use href="#arm" transform="rotate(120)"/>
+      <use href="#arm" transform="rotate(180)"/>
+      <use href="#arm" transform="rotate(240)"/>
+      <use href="#arm" transform="rotate(300)"/>
+    </g>
+    <!-- Touch ID-style corner bracket; four rotated copies make the frame -->
+    <g id="bracket">
+      <path d="M-28,-58 H-42 Q-58,-58 -58,-42 V-28"/>
+    </g>
+    <g id="mark">
+      <g stroke-width="8">
+        <use href="#bracket"/>
+        <use href="#bracket" transform="rotate(90)"/>
+        <use href="#bracket" transform="rotate(180)"/>
+        <use href="#bracket" transform="rotate(270)"/>
+      </g>
+      <g stroke-width="7">
+        <use href="#flake"/>
+      </g>
+    </g>
+    <!-- Four-point sparkle -->
+    <path id="spark" d="M0,-7 C1,-2 2,-1 7,0 C2,1 1,2 0,7 C-1,2 -2,1 -7,0 C-2,-1 -1,-2 0,-7 Z"/>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="320" rx="18" fill="url(#bg)"/>
+  <rect width="1200" height="320" rx="18" fill="url(#glowLeft)"/>
+  <rect width="1200" height="320" rx="18" fill="url(#glowRight)"/>
+
+  <!-- Oversized ghost flakes for depth -->
+  <g stroke="#BFE3FF" stroke-linecap="round" fill="none" opacity="0.07">
+    <use href="#flake" transform="translate(1105,58) rotate(18) scale(3.6)" stroke-width="2.4"/>
+    <use href="#flake" transform="translate(72,286) rotate(-12) scale(1.7)" stroke-width="3.4"/>
+    <use href="#flake" transform="translate(960,268) rotate(40) scale(1.1)" stroke-width="4"/>
+  </g>
+
+  <!-- Frost creeping in from the top-left corner -->
+  <g stroke="#BFE3FF" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.13">
+    <path d="M-4,44 C40,52 66,38 96,56 C118,69 136,64 158,78 M60,46 L74,26 M96,56 L104,36 M130,68 L146,54 M40,50 L48,66"/>
+    <path d="M28,-6 C36,26 58,34 66,62 M46,22 L64,16 M56,40 L72,38"/>
+  </g>
+
+  <!-- Sparkles -->
+  <g fill="#DFF1FF">
+    <use href="#spark" transform="translate(238,64) scale(1.15)" opacity="0.9"/>
+    <use href="#spark" transform="translate(452,256) scale(0.8)" opacity="0.55"/>
+    <use href="#spark" transform="translate(898,84) scale(0.9)" opacity="0.65"/>
+    <use href="#spark" transform="translate(1042,196) scale(0.65)" opacity="0.5"/>
+    <use href="#spark" transform="translate(150,168) scale(0.6)" opacity="0.45"/>
+    <circle cx="330" cy="270" r="2" opacity="0.4"/>
+    <circle cx="700" cy="60" r="2" opacity="0.35"/>
+    <circle cx="1120" cy="250" r="2.4" opacity="0.4"/>
+    <circle cx="540" cy="40" r="1.8" opacity="0.35"/>
+  </g>
+
+  <!-- Brand mark: snowflake in Touch ID brackets, with soft glow -->
+  <g transform="translate(347,160)">
+    <g stroke="#7CC4FF" stroke-linecap="round" fill="none" opacity="0.6" filter="url(#softGlow)">
+      <use href="#mark"/>
+    </g>
+    <g stroke="#EDF7FF" stroke-linecap="round" fill="none">
+      <use href="#mark"/>
+    </g>
+  </g>
+
+  <!-- FROST wordmark -->
+  <text x="466" y="176" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="96" font-weight="800" fill="url(#ice)" letter-spacing="6">FROST</text>
+
+  <!-- Tagline -->
+  <text x="470" y="224" font-family="ui-sans-serif, -apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="26" font-weight="600" fill="#CDE7FA" letter-spacing="0.5">Lock input, not the screen.</text>
+  <text x="470" y="256" font-family="ui-sans-serif, -apple-system, 'SF Pro Text', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="400" fill="#7FA8C9" letter-spacing="0.4">macOS menu-bar input locker &#183; unlocks with Touch ID</text>
+</svg>

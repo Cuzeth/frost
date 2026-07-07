@@ -1,4 +1,6 @@
-# Frost
+<p align="center">
+  <img src="assets/banner.svg" alt="Frost — macOS menu-bar input locker" width="100%">
+</p>
 
 Frost is a macOS menu-bar input locker. It suppresses keyboard, mouse, and
 trackpad input while keeping the display visible, then unlocks with Touch ID on
