@@ -32,6 +32,16 @@
 
 set -euo pipefail
 
+# publish.sh honors SKIP_NOTARIZATION_CHECK=1 for local dry runs. A real
+# release must never inherit it: an un-notarized DMG would be EdDSA-signed,
+# published, and then blocked by Gatekeeper on every user's machine.
+if [ "${SKIP_NOTARIZATION_CHECK:-0}" = "1" ]; then
+  echo "error: SKIP_NOTARIZATION_CHECK is set. Refusing to cut a release" >&2
+  echo "without the notarization/stapling gate. Unset it and retry;" >&2
+  echo "the flag is only for direct scripts/publish.sh dry runs." >&2
+  exit 1
+fi
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_SLUG="${REPO_SLUG:-Cuzeth/frost}"
 APP_PATH="${APP_PATH:-${1:-$REPO_ROOT/build/export/frost.app}}"
