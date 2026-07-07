@@ -46,16 +46,9 @@ jobs:
         run: |
           set -euxo pipefail
 
-          xcodebuild test \
-            -project frost.xcodeproj \
-            -scheme frost \
-            -destination 'platform=macOS' \
-            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -resultBundlePath "$RUNNER_TEMP/TestResults.xcresult" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM=""
+          DERIVED_DATA_PATH="$RUNNER_TEMP/DerivedData" \
+          RESULT_BUNDLE_PATH="$RUNNER_TEMP/TestResults.xcresult" \
+          scripts/test.sh
 
       # Also compile the Release configuration: the safety-critical auto-unlock
       # timer lives behind #if DEBUG, so Release-only breakage around that

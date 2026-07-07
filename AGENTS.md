@@ -55,6 +55,7 @@ Force Quit (`⌘⌥Esc`) is deliberately disabled while locked (`NSApplicationPr
 
 - Target: macOS 14+ (`MACOSX_DEPLOYMENT_TARGET = 14.6`), SwiftUI + AppKit hybrid, `LSUIElement` agent (no Dock icon). Bundle id `dev.abdeen.frost`.
 - Agents should **not** run `xcodebuild`. Hand builds/tests to the human and ask for the output.
+- When handing verification to the human, ask them to run `scripts/test.sh` — it is the exact CI invocation.
 - Releases are packaged with `scripts/publish.sh` (DMG + `generate_appcast`); the appcast is hosted at `https://updates.abdeen.dev/frost/appcast.xml`.
 
 ## Working style

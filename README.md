@@ -332,6 +332,8 @@ data types, and UserDefaults access for Frost's own settings.
 4. Grant Accessibility when prompted.
 5. Quit and relaunch Frost so the Accessibility grant is active in the app process.
 
+To run the unit suite from the command line: `scripts/test.sh` (same invocation CI uses).
+
 Important project settings:
 
 - `MACOSX_DEPLOYMENT_TARGET = 14.6`
