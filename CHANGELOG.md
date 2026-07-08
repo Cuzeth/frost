@@ -21,7 +21,7 @@ them for someone deciding whether to install the update.
 
 ### Fixed
 
-- Frost no longer opens the Settings window when it starts automatically at login. It now launches quietly in the background, and still opens Settings when you launch Frost yourself.
+- Frost no longer opens the Settings window when it starts automatically at login — it now comes up quietly in the background, like other menu-bar apps.
 
 ## [2.1.1] - 2026-07-07
 

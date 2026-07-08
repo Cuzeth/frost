@@ -2,63 +2,36 @@
 //  AppDelegate.swift
 //  frost
 //
-//  Bridges the two AppKit launch hooks SwiftUI doesn't expose, both in service
-//  of one rule: the user must always have a way back into Settings - even with
-//  the menu bar icon hidden, which removes Frost's only other UI.
+//  Bridges the AppKit launch hooks SwiftUI doesn't expose, in service of one
+//  rule: the user must always have a way back into Settings — even with the menu
+//  bar icon hidden, which removes Frost's only other UI.
 //
-//    - On a user-initiated launch with the icon hidden, open Settings (otherwise
-//      the app would start with no visible UI at all). A login-item launch is
-//      NOT user-initiated, so it stays silent — the user booted their Mac, they
-//      didn't ask to see Settings.
-//    - On reopen (relaunching Frost from Finder/Spotlight while it's already
-//      running), open Settings.
+//  Frost never opens a window on launch: at login it must come up silently in
+//  the background, like any other menu-bar agent. The way back into Settings
+//  when the icon is hidden is to relaunch Frost (from Finder/Spotlight) while
+//  it's already running — that delivers a reopen, which opens Settings. A reopen
+//  fired during the initial launch (the system relaunching Frost at login) is
+//  ignored, so booting stays silent.
 //
 
 import AppKit
-import CoreServices
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    // True when macOS started Frost at login rather than the user launching it.
-    // Captured from the launch Apple event in `applicationWillFinishLaunching`,
-    // while that event is still current.
-    private var launchedAsLoginItem = false
-
     // Gate for `applicationShouldHandleReopen`. macOS can deliver a reopen Apple
     // event as part of a login-item launch (and when "Reopen windows when
     // logging back in" relaunches Frost) — indistinguishable from the user
     // double-clicking Frost while it's running. Left ungated, that login-time
-    // reopen pops Settings on every boot. We only honor reopens once the
-    // initial launch batch has drained.
+    // reopen would pop Settings on boot. We only honor reopens once the initial
+    // launch batch has drained.
     private var didFinishInitialLaunch = false
 
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        // The launch Apple event carries keyAELaunchedAsLogInItem when launchd /
-        // SMAppService starts Frost at login. Read it here, while it's still the
-        // current Apple event — by `didFinishLaunching` it may be gone.
-        let event = NSAppleEventManager.shared().currentAppleEvent
-        let isOpenAppEvent = event?.eventID == AEEventID(kAEOpenApplication)
-        let launchSource = event?
-            .paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?
-            .enumCodeValue
-        launchedAsLoginItem = isOpenAppEvent
-            && launchSource == OSType(keyAELaunchedAsLogInItem)
-    }
-
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Read the flag straight from defaults. The default is "shown".
-        let showInMenuBar = UserDefaults.standard
-            .object(forKey: SettingsStore.showInMenuBarKey) as? Bool ?? true
-        // Only surface Settings when the icon is hidden AND the user launched
-        // Frost themselves. At login Frost runs silently; the user can reopen it
-        // from Finder later to get back to Settings (handled below).
-        if !showInMenuBar && !launchedAsLoginItem {
-            SettingsWindowController.shared.show()
-        }
-
-        // Defer past the current run-loop turn so the login-time reopen event
-        // — delivered in the same launch batch, before or just after this
-        // callback — is still seen as "mid-launch" and ignored. Genuine user
-        // reopens arrive much later, once this flag is set.
+        // Deliberately open nothing here — a login launch must stay silent.
+        //
+        // Defer past the current run-loop turn so a reopen event delivered in
+        // this same launch batch (the system relaunching Frost at login) is
+        // still seen as "mid-launch" by the reopen handler and ignored. Genuine
+        // user reopens arrive later, once this flag is set.
         DispatchQueue.main.async { [weak self] in
             self?.didFinishInitialLaunch = true
         }

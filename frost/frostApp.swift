@@ -8,8 +8,9 @@ import AppKit
 
 @main
 struct frostApp: App {
-    // Opens Settings on launch/reopen when the menu bar icon is hidden - the
-    // user's only way back in once the icon is gone.
+    // Reopens Settings when the user relaunches Frost while the menu bar icon is
+    // hidden - the only way back in once the icon is gone. Never opens on launch,
+    // so starting at login stays silent.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     // Owns Sparkle for the app's lifetime. Created once here so the updater
     // starts (and begins its scheduled background checks) at launch.

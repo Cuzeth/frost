@@ -132,7 +132,7 @@ struct SettingsView: View {
                         Text("With the icon hidden and no lock shortcut or auto-lock set, nothing can start a lock.")
                             .foregroundStyle(.orange)
                     }
-                    Text("When off, the menu bar icon is hidden. Relaunch Frost to reopen this window; use Quit below to stop it.")
+                    Text("When off, the menu bar icon is hidden and Frost keeps running quietly in the background, even at login. Open Frost again to return to this window; use Quit below to stop it.")
                         .foregroundStyle(.secondary)
                 }
             }
